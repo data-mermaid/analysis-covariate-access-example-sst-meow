@@ -47,7 +47,7 @@ library(arrow)
 library(sf)
 
 # Install mermaidr.covariates (if needed)
-#remotes::install_github("data-mermaid/mermaidr-covariates")
+# remotes::install_github("data-mermaid/mermaidr-covariates")
 
 library(mermaidrcovariates)
 
@@ -67,12 +67,10 @@ Export all publicly available benthic PIT summary sample events from MERMAID.
 ```{r get-mermaid-data}
 #| results: asis
 # Get all public benthic PIT data at the sample event level
-benthicPIT_data <- mermaid_get_summary_sampleevents() %>% 
-  filter(!is.na(benthicpit_sample_unit_count) &
-           data_policy_benthicpit != "private")
+mermaid_summ_ses <- mermaid_get_summary_sampleevents() 
 
 # Check how many sample events we have
-cat('<span style="color: #006400;">Total sample events:', nrow(benthicPIT_data), '</span>\n\n')
+cat('<span style="color: #006400;">Total sample events:', nrow(mermaid_summ_ses), '</span>\n\n')
 ```
 
 ### Extract Hard Coral Cover
@@ -81,7 +79,15 @@ Hard coral cover is stored in the percent cover columns. We'll focus on total ha
 
 ```{r extract-coral-cover}
 # Extract relevant columns
-coral_data <- benthicPIT_data %>%
+coral_data <- mermaid_summ_ses %>% 
+  rowwise() %>% 
+  mutate(hard_coral_cover =
+           mean(c(`benthicpit_percent_cover_benthic_category_avg_Hard coral`,
+                  `benthiclit_percent_cover_benthic_category_avg_Hard coral`,
+                  `benthicpqt_percent_cover_benthic_category_avg_Hard coral`,
+                  quadrat_benthic_percent_percent_hard_avg_avg), na.rm = T)) %>% 
+  ungroup() %>% 
+  filter(!is.na(hard_coral_cover)) %>% 
   select(
     project,
     country,
@@ -89,10 +95,13 @@ coral_data <- benthicPIT_data %>%
     latitude,
     longitude,
     sample_date,
-    hard_coral_cover = `benthicpit_percent_cover_benthic_category_avg_Hard coral`
+    hard_coral_cover
   ) %>% 
   # Convert date to Date format
   mutate(sample_date = as.Date(sample_date))
+
+# Check how many sample events have hard coral cover estimates 
+cat('<span style="color: #006400;">Total sample events with hard coral data:', nrow(coral_data), '</span>\n\n')
 
 # Create the histogram to get bin data to assign colors
 hist_data <- hist(coral_data$hard_coral_cover,
@@ -168,11 +177,8 @@ The first function of interest is [`list_covariates`](https://data-mermaid.githu
 # Extract id and title from list_covariates() output
 covariates <- list_covariates()
 
-covariates_df <- tibble(
-  id = names(covariates),
-  title = map_chr(covariates, ~.x$title),
-  description = map_chr(covariates, ~.x$description %||% NA_character_)
-)
+covariates_df <- covariates %>% 
+  select(id, title, description)
 
 # Create interactive table
 datatable(
@@ -226,9 +232,11 @@ meow_boundaries <- suppressMessages({
 # Turn off S2 - this is needed to prevent errors
 invisible(sf_use_s2(FALSE))
 
-# Make geometries valid 
+# Make geometries valid and only get MEOW (not PPOW)
 meow_boundaries <- suppressMessages(
-  meow_boundaries %>% st_make_valid()
+  meow_boundaries %>%
+    st_make_valid() %>% 
+    filter(type == "MEOW")
 )
 
 # Convert coral_data to sf object
@@ -264,7 +272,7 @@ if (file.exists(meow_file)) {
   cat('<span style="color: #006400;">Removed MEOW geoparquet file to save space</span>\n\n')
 }
 
-Optionally, remove the entire assets directory if it's empty or no longer needed
+#Optionally, remove the entire assets directory if it's empty or no longer needed
 assets_dir <- "assets/3e410700-2e6a-4b44-a2d3-1d829d19acb0/66b286f6-9085-488a-ba93-159c1b76ccd5"
 if (dir.exists(assets_dir)) {
   unlink(assets_dir, recursive = TRUE)
@@ -276,17 +284,39 @@ if (dir.exists(assets_dir)) {
 
 The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like SST, from the covariates. In this case, we calculate the mean SST just for a single day, as an example, but it can be used to extract data across a given number of days prior to the survey using the `n_days` argument in the function.
 
-```{r get-zonal-stats}
+```{r get-zonal-stats-standard}
+# Start timer
+start_time <- Sys.time()
+
+coral_meow_sst <- coral_meow %>%
+  mermaidrcovariates::get_summary_zonal_statistics(
+    covariate = "Daily Sea Surface Temperature",
+    n_days = 365,
+    radius = 1000,
+    spatial_stats = "mean",
+    temporal_stats = "max")
+
+# Calculate elapsed time
+end_time <- Sys.time()
+elapsed_time <- end_time - start_time
+
+# Print the result
+cat('<span style="color: #006400;">Data retrieval completed in:',
+    round(elapsed_time, 2), attr(elapsed_time, "units"), '</span>\n\n')
+
+```
+
+```{r get-zonal-stats-batches-checks-save}
 #| results: asis
-NumSe <- 2964
-NumDays <- 1
+NumSe <- nrow(coral_meow)
+NumDays <- 365
 
 # Define the file path for saved data
 data_dir <- "../data"
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE)
 }
-sst_data_file <- file.path(data_dir, paste0("coralMeowSst_NumSe", NumSe, "_NumDays", NumDays, ".rds"))
+sst_data_file <- file.path(data_dir, paste0("coralMeowSstSubset_NumSe", NumSe, "_NumDays", NumDays, ".rds"))
 
 # Check if data already exists
 if (file.exists(sst_data_file) & force_download == FALSE) {
@@ -298,46 +328,48 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
 } else {
   cat('<span style="color: #006400;">Downloading SST data (this may take a while)...',
       '</span>\n\n')
-  
+
   # Start timer
   start_time <- Sys.time()
-  
+
   # Process in batches to handle potential errors
-  batch_size <- 100  # Adjust based on what works for your data
+  batch_size <- 10  # Adjust based on what works for your data
   total_rows <- NumSe
   all_results <- list()
   failed_rows <- c()
-  
+
   for (start in seq(1, total_rows, by = batch_size)) {
     end <- min(start + batch_size - 1, total_rows)
-    
-    cat('<span style="color: #006400;">Processing rows', start, 'to', end, 
+
+    cat('<span style="color: #006400;">Processing rows', start, 'to', end,
         'of', total_rows, '...</span>\n\n')
-    
+
     tryCatch({
-      batch_result <- coral_meow %>% 
-        slice(start:end) %>% 
-        mermaidrcovariates::get_zonal_statistics(
-          covariate_id = '50b810fb-5f17-4cdb-b34b-c377837e2a29',
-          n_days = NumDays, 
-          buffer = 1000,
-          stats = "mean"
+      batch_result <- coral_meow %>%
+        slice(start:end) %>%
+        mermaidrcovariates::get_summary_zonal_statistics(
+          covariate = "Daily Sea Surface Temperature",
+          n_days = NumDays,
+          radius = 1000,
+          spatial_stats = "mean",
+          temporal_stats = "max"
         )
       all_results[[length(all_results) + 1]] <- batch_result
-      
+
     }, error = function(e) {
       cat('<span style="color: #cc0000;">Batch error, processing row by row...</span>\n\n')
-      
+
       # Process this batch row by row
       for (i in start:end) {
         tryCatch({
-          row_result <- coral_meow %>% 
-            slice(i) %>% 
-            mermaidrcovariates::get_zonal_statistics(
-              covariate_id = '50b810fb-5f17-4cdb-b34b-c377837e2a29',
-              n_days = 1, 
-              buffer = 1000,
-              stats = "mean"
+          row_result <- coral_meow %>%
+            slice(i) %>%
+            mermaidrcovariates::get_summary_zonal_statistics(
+              covariate = "Daily Sea Surface Temperature",
+              n_days = NumDays,
+              radius = 1000,
+              spatial_stats = "mean",
+              temporal_stats = "max"
             )
           all_results[[length(all_results) + 1]] <- row_result
         }, error = function(e2) {
@@ -347,30 +379,30 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
       }
     })
   }
-  
+
   # Combine all successful results
   coral_meow_sst <- bind_rows(all_results)
-  
+
   # Calculate elapsed time
   end_time <- Sys.time()
   elapsed_time <- end_time - start_time
-  
+
   # Print the result
   cat('<span style="color: #006400;">Data retrieval completed in:',
       round(elapsed_time, 2), attr(elapsed_time, "units"), '</span>\n\n')
-  
+
   if (length(failed_rows) > 0) {
-    cat('<span style="color: #cc0000;">Failed rows:', 
+    cat('<span style="color: #cc0000;">Failed rows:',
         paste(failed_rows, collapse = ", "), '</span>\n\n')
   }
-  
+
   # Unnest data for easier use
-  coral_meow_sst <- coral_meow_sst %>% 
+  coral_meow_sst <- coral_meow_sst %>%
     unnest(covariates)
-  
+
   cat('<span style="color: #006400;">Total SST records retrieved:',
       nrow(coral_meow_sst), '</span>\n\n')
-  
+
   # Save the data
   saveRDS(coral_meow_sst, sst_data_file)
   cat('<span style="color: #006400;">Data saved to:',
@@ -384,11 +416,11 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
 #| results: asis
 #Get rid of rows with NAs, select specific columns, and rename to more appropriate titles
 analysis_data <- coral_meow_sst %>%
-  rename(sst_mean = value) %>% 
+  rename(sst_mean = value) %>%
   select(project, country, site, sample_date,
          hard_coral_cover, sst_mean,
          ecoregion, realm,
-         latitude, longitude) %>% 
+         latitude, longitude) %>%
   filter(!is.na(sst_mean) & !is.na(hard_coral_cover) & !is.na(realm))
 
 cat('<span style="color: #006400;">Number of SEs without NAs: ',
@@ -451,14 +483,14 @@ overall_cor <- cor.test(
   analysis_data$hard_coral_cover
 )
 
-cat('<span style="color: #006400;">Overall correlation:', round(overall_cor$estimate, 3), 
+cat('<span style="color: #006400;">Overall correlation:', round(overall_cor$estimate, 3),
     '| P-value:', format.pval(overall_cor$p.value, digits = 3), '</span>\n\n')
 ```
 
 ### By Marine Realm
 
 ```{r by-realm}
-# Filter to realms with sufficient sample sizes (e.g., n >= 20)
+Filter to realms with sufficient sample sizes (e.g., n >= 20)
 min_samples <- 20
 realms_to_plot <- realm_summary %>%
   filter(n_samples >= min_samples) %>%
@@ -513,7 +545,7 @@ datatable(
 ### Interactive Multi-Realm Plot
 
 ```{r interactive-realm-plot}
-# Create interactive plot with all realms on same axes
+Create interactive plot with all realms on same axes
 interactive_plot <- plot_ly(data = plot_data) %>%
   add_markers(
     x = ~sst_mean,

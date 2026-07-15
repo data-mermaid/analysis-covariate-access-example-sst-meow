@@ -1,0 +1,456 @@
+---
+title: "Connecting MERMAID ecological data with covariates example"
+subtitle: "Exploring relationships between hard coral cover and heat stress (Degree Heating Weeks) in East Africa"
+author:
+  - name: Iain R. Caldwell
+  - name: Sharla Gelfand
+  - name: Emily Darling
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    self-contained: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor: visual
+title-block-banner: "#f0f3f5"
+title-block-banner-color: "black"
+include-after-body: "footer.html"
+editor_options: 
+  chunk_output_type: console
+---
+
+## Overview
+
+This analysis explores the relationship between hard coral cover and recent heat stress exposure across MERMAID benthic survey sites in Kenya and Tanzania. Heat stress is measured as Degree Heating Weeks (DHW), a NOAA metric summarizing accumulated thermal stress over the 30 days prior to each survey. We use the `mermaidrcovariates` package to access this environmental data for MERMAID survey locations.
+
+Key questions:
+
+- How does hard coral cover relate to recent DHW exposure?
+- Which sites and years experienced significant bleaching-level heat stress (DHW > 4)?
+
+## Setup
+
+```{r setup}
+#| warning: false
+library(here)
+library(tidyverse)
+library(mermaidr)
+library(plotly)
+library(DT)
+
+# Install mermaidrcovariates (if needed)
+# remotes::install_github("data-mermaid/mermaidr-covariates")
+library(mermaidrcovariates)
+
+# Set theme for ggplot
+theme_set(theme_minimal(base_size = 12))
+
+# Directory for cached API downloads
+if (!dir.exists(here::here("data"))) dir.create(here::here("data"))
+```
+
+## Data Export
+
+### MERMAID Benthic Data
+
+Export all publicly available benthic PIT summary sample events from MERMAID for Kenya and Tanzania. This is a slow API call, so results are cached locally and reused on subsequent renders.
+
+```{r get-mermaid-data}
+#| results: asis
+mermaid_summ_ses_path <- here::here("data", "mermaid_summ_ses.rds")
+
+if (file.exists(mermaid_summ_ses_path)) {
+  
+  mermaid_summ_ses <- readRDS(mermaid_summ_ses_path)
+  cat('<span style="color: #4682B4;">Loaded cached summary sample events from', 
+      mermaid_summ_ses_path, '</span>\n\n')
+  
+} else {
+  
+  mermaid_summ_ses <- mermaid_get_summary_sampleevents()
+  saveRDS(mermaid_summ_ses, mermaid_summ_ses_path)
+  
+}
+
+mermaid_summ_ses <- mermaid_summ_ses %>% 
+  filter(country %in% c("Kenya", "Tanzania"))
+
+cat('<span style="color: #006400;">Total sample events:', nrow(mermaid_summ_ses), '</span>\n\n')
+```
+
+### Extract Hard Coral Cover
+
+Hard coral cover is stored across several percent-cover columns depending on survey method. We average across methods and show the distribution as a histogram.
+
+```{r extract-coral-cover}
+coral_data <- mermaid_summ_ses %>% 
+  rowwise() %>% 
+  mutate(hard_coral_cover =
+           mean(c(`benthicpit_percent_cover_benthic_category_avg_Hard coral`,
+                  `benthiclit_percent_cover_benthic_category_avg_Hard coral`,
+                  `benthicpqt_percent_cover_benthic_category_avg_Hard coral`,
+                  quadrat_benthic_percent_percent_hard_avg_avg), na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  filter(!is.na(hard_coral_cover)) %>% 
+  select(project, country, site, latitude, longitude, sample_date, hard_coral_cover) %>% 
+  mutate(sample_date = as.Date(sample_date))
+
+cat('<span style="color: #006400;">Total sample events with hard coral data:', 
+    nrow(coral_data), '</span>\n\n')
+```
+
+```{r coral-cover-histogram}
+hist_data <- hist(coral_data$hard_coral_cover,
+                   breaks = seq(0, 100, by = 2),
+                   plot = FALSE)
+
+bin_colors <- sapply(seq_along(hist_data$counts), function(i) {
+  if (i <= 5) {
+    '#d13823'
+  } else if (i <= 15) {
+    '#f3a224'
+  } else {
+    '#277d1d'
+  }
+})
+
+hardCoralAggHist <-
+  plot_ly(x = coral_data$hard_coral_cover,
+          type = 'histogram',
+          xbins = list(start = 0, size = 2, end = 100),
+          marker = list(color = bin_colors), height = 450,
+          hovertemplate = "Bin: %{x}%<br>%{y} surveys<extra></extra>") %>%
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom', 'pan', 'select', 'zoomIn', 'zoomOut',
+                                     'autoScale', 'resetScale', 'lasso2d',
+                                     'hoverClosestCartesian', 'hoverCompareCartesian')) %>% 
+  layout(bargap = 0.1,
+         shapes = list(
+           list(type = "line", x0 = 10, x1 = 10, y0 = 0, y1 = 1, yref = "paper", 
+                line = list(color = "black", dash = "dot")),
+           list(type = "line", x0 = 30, x1 = 30, y0 = 0, y1 = 1, yref = "paper", 
+                line = list(color = "black", dash = "dot"))
+         ),
+         xaxis = list(title = "Hard coral cover (%)",
+                      linecolor = "black", linewidth = 2,
+                      tickvals = seq(0, 100, by = 10),
+                      ticktext = seq(0, 100, by = 10)),
+         yaxis = list(title = "Number of surveys",
+                      linecolor = "black", linewidth = 2),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "HARD CORAL COVER", showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08, text = paste0(nrow(coral_data), " Surveys"),
+                showarrow = FALSE, xref = 'paper', yref = 'paper', 
+                xanchor = 'left', yanchor = 'top', font = list(size = 12))
+         ),
+         margin = list(t = 50, b = 75))
+
+hardCoralAggHist
+```
+
+## Get Covariates
+
+Now we'll use `mermaidrcovariates` to get Degree Heating Week (DHW) data for each survey site.
+
+### List covariates
+
+`list_covariates()` shows which environmental covariates are available.
+
+```{r list-covariates}
+covariates_df <- list_covariates() %>% 
+  select(id, title, description)
+
+datatable(
+  covariates_df,
+  options = list(pageLength = 10, scrollX = TRUE, autoWidth = TRUE),
+  caption = "Available MERMAID Covariates",
+  rownames = FALSE,
+  filter = "top"
+)
+```
+
+### Get zonal statistics for DHW (raster)
+
+`get_zonal_statistics()` extracts raster covariate data — here, mean DHW over the 30 days prior to each survey. This is the slowest step in the pipeline, so results are cached locally.
+
+```{r get-zonal-stats-dhw}
+#| results: asis
+covars_path <- here::here("data", "coral_data_dhw_30days.rds")
+
+start_time <- Sys.time()
+
+if (file.exists(covars_path)) {
+  
+  coral_data_dhw <- readRDS(covars_path)
+  cat('<span style="color: #4682B4;">Loaded cached DHW data from', covars_path, '</span>\n\n')
+  
+} else {
+  
+  coral_data_dhw <- coral_data %>%
+    mermaidrcovariates::get_zonal_statistics(
+      covariate = "Daily Global 5km Satellite Coral Bleaching Degree Heating Week",
+      n_days = 30,
+      radius = 1000,
+      spatial_stats = "mean")
+  
+  saveRDS(coral_data_dhw, covars_path)
+  
+}
+
+elapsed_time <- Sys.time() - start_time
+cat('<span style="color: #006400;">Data retrieval completed in:',
+    round(elapsed_time, 2), attr(elapsed_time, "units"), '</span>\n\n')
+```
+
+### Summarize maximum DHW exposure per site
+
+For each survey, we take the maximum DHW value recorded in the prior 30 days, then flag sites that crossed the NOAA Bleaching Alert Level 1 threshold (DHW > 4).
+
+```{r summarize-max-dhw}
+#| results: asis
+max_dhw_summary <- coral_data_dhw %>%
+  summarise_zonal_statistics("max") %>%
+  select(site, sample_date, summary_zonal_statistics) %>%
+  unnest(summary_zonal_statistics)
+
+dhw_4_or_more <- max_dhw_summary %>% 
+  filter(value > 4) %>% 
+  arrange(-value)
+
+cat('<span style="color: #006400;">Sites with DHW > 4 in the 30 days prior to survey:',
+    nrow(dhw_4_or_more), '</span>\n\n')
+```
+
+```{r dhw-histogram}
+bin_width <- 0.5
+breaks <- seq(0, ceiling(max(dhw_4_or_more$value)), by = bin_width)
+
+dhw_binned <- dhw_4_or_more %>%
+  mutate(bin = cut(value, breaks = breaks, right = FALSE, include.lowest = TRUE)) %>%
+  count(bin, .drop = FALSE) %>%
+  mutate(
+    bin_left = breaks[-length(breaks)],
+    bin_mid  = bin_left + bin_width / 2,
+    bin_color = if_else(bin_mid < 8, '#f3a224', '#d13823')
+  )
+
+dhwAggHist <-
+  plot_ly(data = dhw_binned,
+          x = ~bin_left + bin_width / 2,
+          y = ~n,
+          type = 'bar',
+          width = bin_width * 0.9,
+          marker = list(color = ~bin_color),
+          height = 450,
+          hovertemplate = "Bin: %{x} DHW<br>%{y} surveys<extra></extra>") %>%
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom', 'pan', 'select', 'zoomIn', 'zoomOut',
+                                     'autoScale', 'resetScale', 'lasso2d',
+                                     'hoverClosestCartesian', 'hoverCompareCartesian')) %>% 
+  layout(bargap = 0.1,
+         shapes = list(
+           list(type = "line", x0 = 8, x1 = 8, y0 = 0, y1 = 1, yref = "paper", 
+                line = list(color = "black", dash = "dot"))
+         ),
+         xaxis = list(title = "Degree Heating Weeks (DHW)",
+                      linecolor = "black", linewidth = 2),
+         yaxis = list(title = "Number of surveys",
+                      linecolor = "black", linewidth = 2),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "DEGREE HEATING WEEKS", showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08, text = paste0(nrow(dhw_4_or_more), " Surveys"),
+                showarrow = FALSE, xref = 'paper', yref = 'paper', 
+                xanchor = 'left', yanchor = 'top', font = list(size = 12))
+         ),
+         margin = list(t = 50, b = 75))
+
+dhwAggHist
+```
+
+## Create a Final Analysis File
+
+Join hard coral cover with maximum DHW exposure, collapsing any duplicate records per survey.
+
+```{r final-analysis-file}
+#| results: asis
+coral_data_with_covariate <- coral_data %>% 
+  left_join(max_dhw_summary, by = c("site", "sample_date")) %>% 
+  group_by(project, country, site, latitude, longitude, sample_date, covariate) %>% 
+  summarise(hard_coral_cover = mean(hard_coral_cover),
+            value = mean(value),
+            .groups = "drop") %>% 
+  mutate(year = lubridate::year(sample_date)) %>% 
+  filter(!is.na(hard_coral_cover) & !is.na(value))
+
+cat('<span style="color: #006400;">Number of surveys with matched coral cover and DHW data:',
+    nrow(coral_data_with_covariate), '</span>\n\n')
+```
+
+## Data Summary
+
+### Sample Distribution by Year
+
+```{r sample-summary}
+year_summary <- coral_data_with_covariate %>%
+  group_by(year) %>%
+  summarise(
+    n_samples = n(),
+    n_sites = n_distinct(site),
+    mean_coral_cover = mean(hard_coral_cover, na.rm = TRUE),
+    mean_dhw = mean(value, na.rm = TRUE),
+    max_dhw = max(value, na.rm = TRUE),
+    n_high_stress = sum(value > 8, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+datatable(
+  year_summary,
+  options = list(pageLength = 10, scrollX = TRUE),
+  caption = "Summary statistics by year",
+  rownames = FALSE
+) %>%
+  formatRound(columns = c("mean_coral_cover", "mean_dhw", "max_dhw"), digits = 2)
+```
+
+## Coral Cover vs. Heat Stress Analysis
+
+### Overall Relationship
+
+```{r coral-cover-dhw-scatter}
+y_max <- max(coral_data_with_covariate$value, na.rm = TRUE) * 1.05
+
+coralDhwScatter <-
+  plot_ly(data = coral_data_with_covariate,
+          x = ~hard_coral_cover,
+          y = ~value,
+          type = 'scatter',
+          mode = 'markers',
+          marker = list(color = "black", size = 8, opacity = 0.6),
+          height = 450,
+          text = ~paste0(site, ", ", country, "<br>", format(sample_date, "%b %d, %Y")),
+          hovertemplate = "%{text}<br>Hard coral cover: %{x:.1f}%<br>DHW: %{y:.1f}<extra></extra>") %>%
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom', 'pan', 'select', 'zoomIn', 'zoomOut',
+                                     'autoScale', 'resetScale', 'lasso2d',
+                                     'hoverClosestCartesian', 'hoverCompareCartesian')) %>% 
+  layout(shapes = list(
+           list(type = "rect", x0 = 0, x1 = 1, xref = "paper", y0 = 0, y1 = 4,
+                fillcolor = '#277d1d', opacity = 0.12, line = list(width = 0), layer = "below"),
+           list(type = "rect", x0 = 0, x1 = 1, xref = "paper", y0 = 4, y1 = 8,
+                fillcolor = '#f3a224', opacity = 0.15, line = list(width = 0), layer = "below"),
+           list(type = "rect", x0 = 0, x1 = 1, xref = "paper", y0 = 8, y1 = y_max,
+                fillcolor = '#d13823', opacity = 0.15, line = list(width = 0), layer = "below"),
+           list(type = "line", x0 = 0, x1 = 1, xref = "paper", y0 = 4, y1 = 4, 
+                line = list(color = "black", dash = "dot")),
+           list(type = "line", x0 = 0, x1 = 1, xref = "paper", y0 = 8, y1 = 8, 
+                line = list(color = "black", dash = "dot"))
+         ),
+         xaxis = list(title = "Hard coral cover (%)",
+                      linecolor = "black", linewidth = 2, range = c(0, 100)),
+         yaxis = list(title = "DHW exposure (past 30 days)",
+                      linecolor = "black", linewidth = 2, range = c(0, y_max)),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "CORAL COVER VS. HEAT STRESS", showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08, text = paste0(nrow(coral_data_with_covariate), " Surveys"),
+                showarrow = FALSE, xref = 'paper', yref = 'paper', 
+                xanchor = 'left', yanchor = 'top', font = list(size = 12))
+         ),
+         margin = list(t = 50, b = 75))
+
+coralDhwScatter
+```
+
+```{r overall-correlation}
+#| results: asis
+overall_cor <- cor.test(coral_data_with_covariate$value, coral_data_with_covariate$hard_coral_cover)
+
+cat('<span style="color: #006400;">Overall correlation (DHW vs. coral cover):', 
+    round(overall_cor$estimate, 3),
+    '| P-value:', format.pval(overall_cor$p.value, digits = 3), '</span>\n\n')
+```
+
+### By Year
+
+Faceted by year, restricted to years that included at least one bleaching-level heat stress event (DHW > 4).
+
+```{r facet-by-year}
+bands <- tibble(
+  ymin = c(0, 4, 8),
+  ymax = c(4, 8, y_max),
+  fill = c('#277d1d', '#f3a224', '#d13823')
+)
+
+years_with_heat_stress <- coral_data_with_covariate %>%
+  filter(value > 4) %>%
+  distinct(year) %>%
+  pull(year)
+
+coral_data_heat_years <- coral_data_with_covariate %>%
+  filter(year %in% years_with_heat_stress)
+
+coralDhwFacetGG <-
+  ggplot(coral_data_heat_years, aes(x = hard_coral_cover, y = value)) +
+  geom_rect(data = bands, inherit.aes = FALSE,
+            aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = fill),
+            alpha = 0.15) +
+  scale_fill_identity() +
+  geom_hline(yintercept = c(4, 8), linetype = "dotted", color = "black") +
+  geom_point(color = "black", alpha = 0.6, size = 1.8) +
+  facet_wrap(~ year, ncol = 3) +
+  coord_cartesian(xlim = c(0, 100), ylim = c(0, y_max)) +
+  labs(title = "CORAL COVER VS. HEAT STRESS, BY YEAR",
+       subtitle = paste0(nrow(coral_data_heat_years), " Surveys (years with DHW > 4 only)"),
+       x = "Hard coral cover (%)",
+       y = "DHW exposure (past 30 days)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 12, color = "grey30"),
+    axis.line = element_line(color = "black", linewidth = 0.6)
+  )
+
+coralDhwFacetGG
+```
+
+## Key Findings
+
+**Overall pattern:** The correlation between recent DHW exposure and hard coral cover across all surveys is `r round(overall_cor$estimate, 3)` (p = `r format.pval(overall_cor$p.value, digits = 3)`).
+
+**Heat stress exposure:** `r nrow(dhw_4_or_more)` surveys (`r round(100 * nrow(dhw_4_or_more) / nrow(coral_data_dhw), 1)`%) recorded DHW > 4 — NOAA Bleaching Alert Level 1 or higher — in the 30 days prior to sampling. These events occurred in `r length(years_with_heat_stress)` year(s): `r paste(years_with_heat_stress, collapse = ", ")`.
+
+Understanding whether heat stress exposure coincides with lower coral cover at these sites can help prioritize monitoring and management attention ahead of future bleaching events.
+
+## Data Access
+
+This analysis uses:
+
+- **MERMAID data:** Benthic PIT sample events from Kenya and Tanzania, accessed via the `mermaidr` package
+- **Environmental covariates:** Daily Global 5km Satellite Coral Bleaching Degree Heating Week, accessed via the `mermaidrcovariates` package
+- **DHW exposure:** Maximum DHW value over the 30 days prior to each survey date
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```

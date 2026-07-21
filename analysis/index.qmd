@@ -8,6 +8,8 @@ editor: visual
 
 **WCS MERMAID Covariates Example**
 
--   [Coral cover covariates analysis example webpage](coral-cover-covariates-analysis.html) (rendered html)
+- [Coral cover covariates analysis example webpage](coral-cover-covariates-analysis.html) (rendered html)
 
--   [Repository](https://github.com/data-mermaid/analysis-covariate-access-example-sst-meow)
+- [DHW East Africa example](coral-cover-covariates-DHW-East-Africa.html) (2nd rendered html)
+
+- [Repository](https://github.com/data-mermaid/analysis-covariate-access-example-sst-meow)

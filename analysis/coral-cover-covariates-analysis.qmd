@@ -30,8 +30,8 @@ This analysis explores the relationship between hard coral cover and sea surface
 
 **Key questions:**
 
--   How does hard coral cover vary with mean SST?
--   Do these relationships differ across marine biogeographic realms?
+- How does hard coral cover vary with mean SST?
+- Do these relationships differ across marine biogeographic realms?
 
 ## Setup
 
@@ -618,8 +618,8 @@ The global correlation between hard coral cover and mean SST (2-year average) is
 
 **Realm-Specific Patterns:**
 
--   **Strongest positive relationship:** `r strongest_positive$realm` (r = `r round(strongest_positive$correlation, 3)`, n = `r strongest_positive$n_samples`)
--   **Strongest negative relationship:** `r strongest_negative$realm` (r = `r round(strongest_negative$correlation, 3)`, n = `r strongest_negative$n_samples`)
+- **Strongest positive relationship:** `r strongest_positive$realm` (r = `r round(strongest_positive$correlation, 3)`, n = `r strongest_positive$n_samples`)
+- **Strongest negative relationship:** `r strongest_negative$realm` (r = `r round(strongest_negative$correlation, 3)`, n = `r strongest_negative$n_samples`)
 
 The relationship between coral cover and SST varies considerably across marine realms, suggesting that local factors, thermal history, and biogeographic context play important roles in determining coral community composition and health.
 
@@ -627,10 +627,10 @@ The relationship between coral cover and SST varies considerably across marine r
 
 This analysis uses:
 
--   **MERMAID data:** Global benthic PIT sample events accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
--   **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
-    -   SST data: Mean temperature over 2 years prior to survey date
-    -   Marine realms: From Marine Ecoregions of the World (MEOW) classification
+- **MERMAID data:** Global benthic PIT sample events accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
+- **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
+  - SST data: Mean temperature over 2 years prior to survey date
+  - Marine realms: From Marine Ecoregions of the World (MEOW) classification
 
 ## Session Info
 

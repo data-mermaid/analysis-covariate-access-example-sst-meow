@@ -33,8 +33,8 @@ This analysis explores the relationship between hard coral cover and sea surface
 
 **Key questions:**
 
--   How does hard coral cover vary in East Africa?
--   What is the exposure of different reefs to Degree Heating Weeks (DHW)?
+- How does hard coral cover vary in East Africa?
+- What is the exposure of different reefs to Degree Heating Weeks (DHW)?
 
 ## Setup
 
@@ -52,7 +52,7 @@ library(sf)
 library(janitor)
 
 # Install mermaidr.covariates (if needed)
-#remotes::install_github("data-mermaid/mermaidr-covariates")
+remotes::install_github("data-mermaid/mermaidr-covariates")
 
 library(mermaidrcovariates)
 
@@ -72,22 +72,19 @@ Export all publicly available benthic PIT summary sample events from MERMAID.
 ```{r get-mermaid-data}
 #| results: asis
 # Get all public benthic PIT data at the sample event level
-mermaid_summ_ses_path <- here::here("data", "mermaid_summ_ses.rds")
+mermaid_summ_ses_path <- file.path(dirname(here::here()), "data", "mermaid_summ_ses.rds")
 
 if (file.exists(mermaid_summ_ses_path)) {
-  
   mermaid_summ_ses <- readRDS(mermaid_summ_ses_path)
   cat('<span style="color: #4682B4;">Loaded cached summary sample events from', mermaid_summ_ses_path, '</span>\n\n')
-  
 } else {
-  
   mermaid_summ_ses <- mermaid_get_summary_sampleevents()
+  dir.create(dirname(mermaid_summ_ses_path), showWarnings = FALSE, recursive = TRUE)
   saveRDS(mermaid_summ_ses, mermaid_summ_ses_path)
-  
 }
 
-file.exists("data/mermaid_summ_ses.rds")
-file.size("data/mermaid_summ_ses.rds")
+#file.exists("data/mermaid_summ_ses.rds")
+#file.size("data/mermaid_summ_ses.rds")
 
 mermaid_summ_ses <- mermaid_summ_ses %>% 
   filter(country %in% c("Kenya", "Tanzania"))
@@ -231,7 +228,7 @@ covariates_df %>% filter(id == "daily_dhw") %>%
   select(title) #need full name of covariate
 
 #set path, use if/else to read or cache the API call
-covars_path <- here::here("data", "coral_data_dhw_30days.rds")
+covars_path <- file.path(dirname(here::here()), "data", "coral_data_dhw_30days.rds") 
 
 # Start timer
 start_time <- Sys.time()
@@ -249,6 +246,8 @@ if (file.exists(covars_path)) {
       n_days = 30,
       radius = 1000,
       spatial_stats = "mean")
+  
+  dir.create(dirname(covars_path), showWarnings = FALSE, recursive = TRUE)
   
   saveRDS(coral_data_dhw, covars_path)
   

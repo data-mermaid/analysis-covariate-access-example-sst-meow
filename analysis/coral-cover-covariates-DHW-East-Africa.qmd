@@ -29,7 +29,7 @@ editor_options:
 
 ## Overview
 
-This analysis explores the relationship between hard coral cover and sea surface temperature (SST) across different marine realms using global MERMAID benthic data. We use the [mermaidrcovariates](https://data-mermaid.github.io/mermaidr-covariates/) package to access environmental data for MERMAID survey locations.
+This analysis explores the relationship between hard coral cover and degree heating weeks (DHW) in East Africa. We use the [mermaidrcovariates](https://data-mermaid.github.io/mermaidr-covariates/) package to access environmental data for MERMAID survey locations.
 
 **Key questions:**
 
@@ -59,6 +59,16 @@ library(mermaidrcovariates)
 # Set theme for ggplot
 theme_set(theme_minimal(base_size = 12))
 
+# Helper for the coloured status messages used throughout this document.
+# knitr::asis_output() emits raw HTML on its own, so the chunk does NOT need
+# `results: asis` and ordinary printed output (tibbles, data frames) in the
+# same chunk still gets formatted normally.
+status_msg <- function(..., color = "#006400") {
+  knitr::asis_output(
+    paste0('<span style="color: ', color, ';">', paste(...), '</span>\n\n')
+  )
+}
+
 # Set this to TRUE to force re-download of MEOW boundaries
 force_download <- FALSE
 ```
@@ -70,13 +80,13 @@ force_download <- FALSE
 Export all publicly available benthic PIT summary sample events from MERMAID.
 
 ```{r get-mermaid-data}
-#| results: asis
 # Get all public benthic PIT data at the sample event level
-mermaid_summ_ses_path <- file.path(dirname(here::here()), "data", "mermaid_summ_ses.rds")
+mermaid_summ_ses_path <- here::here("data", "mermaid_summ_ses.rds")
 
 if (file.exists(mermaid_summ_ses_path)) {
   mermaid_summ_ses <- readRDS(mermaid_summ_ses_path)
-  cat('<span style="color: #4682B4;">Loaded cached summary sample events from', mermaid_summ_ses_path, '</span>\n\n')
+  status_msg("Loaded cached summary sample events from", mermaid_summ_ses_path,
+             color = "#4682B4")
 } else {
   mermaid_summ_ses <- mermaid_get_summary_sampleevents()
   dir.create(dirname(mermaid_summ_ses_path), showWarnings = FALSE, recursive = TRUE)
@@ -90,7 +100,7 @@ mermaid_summ_ses <- mermaid_summ_ses %>%
   filter(country %in% c("Kenya", "Tanzania"))
 
 # Check how many sample events we have
-cat('<span style="color: #006400;">Total sample events:', nrow(mermaid_summ_ses), '</span>\n\n')
+status_msg("Total sample events:", nrow(mermaid_summ_ses))
 ```
 
 ### Extract Hard Coral Cover
@@ -121,7 +131,7 @@ coral_data <- mermaid_summ_ses %>%
   mutate(sample_date = as.Date(sample_date))
 
 # Check how many sample events have hard coral cover estimates 
-cat('<span style="color: #006400;">Total sample events with hard coral data:', nrow(coral_data), '</span>\n\n')
+status_msg("Total sample events with hard coral data:", nrow(coral_data))
 
 # Create the histogram to get bin data to assign colors
 hist_data <- hist(coral_data$hard_coral_cover,
@@ -187,7 +197,7 @@ hardCoralAggHist
 
 ### Get Covariates
 
-Now we'll use `mermaidrcovariates` to get SST and Marine Ecoregions of the World (MEOW) realm data.
+Now we'll use `mermaidrcovariates` to get DHW data.
 
 #### List covariates
 
@@ -214,21 +224,29 @@ datatable(
 )
 ```
 
-#### Get zonal statistics for SST (raster)
+#### Get zonal statistics for DHW (raster)
 
-The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like SST, from the covariates. In this case, we calculate the mean SST just for a single day, as an example, but it can be used to extract data across a given number of days prior to the survey using the `n_days` argument in the function.
+The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like DHW, from the covariates. In this case, we calculate the mean DHW for 30 days previous to the sample date, as an example, but it can be used to extract data across any number of days prior to the survey using the `n_days` argument in the function.
 
 ```{r get-zonal-stats-standard}
 
+# How the surveys break down by country
 coral_data %>% 
-  tabyl(country)
+  tabyl(country) %>% 
+  adorn_pct_formatting(digits = 1) %>% 
+  rename(Country = country, Surveys = n, `Percent of surveys` = percent) %>% 
+  knitr::kable(align = c("l", "r", "r"))
 
-#check full name of desired covariate
-covariates_df %>% filter(id == "daily_dhw") %>% 
-  select(title) #need full name of covariate
+# get_zonal_statistics() needs the covariate's full title, so look it up by id
+# rather than typing it out (pull() returns a plain string, not a tibble)
+dhw_covariate <- covariates_df %>% 
+  filter(id == "daily_dhw") %>% 
+  pull(title)
+
+status_msg("Using covariate:", dhw_covariate, color = "#4682B4")
 
 #set path, use if/else to read or cache the API call
-covars_path <- file.path(dirname(here::here()), "data", "coral_data_dhw_30days.rds") 
+covars_path <- here::here("data", "coral_data_dhw_30days.rds")
 
 # Start timer
 start_time <- Sys.time()
@@ -236,13 +254,13 @@ start_time <- Sys.time()
 if (file.exists(covars_path)) {
   
   coral_data_dhw <- readRDS(covars_path)
-  cat('<span style="color: #4682B4;">Loaded cached DHW data from', covars_path, '</span>\n\n')
+  status_msg("Loaded cached DHW data from", covars_path, color = "#4682B4")
   
 } else {
   
   coral_data_dhw <- coral_data %>%
     mermaidrcovariates::get_zonal_statistics(
-      covariate = "Daily Global 5km Satellite Coral Bleaching Degree Heating Week",
+      covariate = dhw_covariate,
       n_days = 30,
       radius = 1000,
       spatial_stats = "mean")
@@ -258,41 +276,39 @@ end_time <- Sys.time()
 elapsed_time <- end_time - start_time
 
 # Print the result
-cat('<span style="color: #006400;">Data retrieval completed in:',
-    round(elapsed_time, 2), attr(elapsed_time, "units"), '</span>\n\n')
+status_msg("Data retrieval completed in:",
+           round(elapsed_time, 2), attr(elapsed_time, "units"))
 
 ```
 
 ```{r work-with-zonal-stats}
-coral_data_dhw
-
 coral_data_dhw_summary <- coral_data_dhw %>%
   select(site, sample_date, zonal_statistics) %>%
   unnest(zonal_statistics)
 
-names(coral_data_dhw_summary)
+#names(coral_data_dhw_summary)
 
-coral_data_dhw_summary %>%  
-  filter(value > 0) %>% 
-  arrange(-value)
+# coral_data_dhw_summary %>%  
+#   filter(value > 0) %>% 
+#   arrange(-value)
 
 max_dhw <- coral_data_dhw %>%
   summarise_zonal_statistics("max")
 
-max_dhw
+#max_dhw
 
 max_dhw_summary <- max_dhw %>%
   select(site, sample_date, summary_zonal_statistics) %>%
   unnest(summary_zonal_statistics)
 
-max_dhw_summary
-names(max_dhw_summary)
+#max_dhw_summary
+#names(max_dhw_summary)
 
 dhw_4_or_more <- max_dhw_summary %>% 
   filter(value > 4) %>% 
   arrange(-value)
 
-nrow(dhw_4_or_more) #75 sites with DHW>4 in 30 days prior to survey
+#nrow(dhw_4_or_more) #74 sites with DHW>4 in 30 days prior to survey
 
 # Create the histogram to get bin data to assign colors
 # Bin the data manually (single source of truth for bin edges)
@@ -303,7 +319,10 @@ bin_end <- ceiling(max(dhw_4_or_more$value))
 breaks <- seq(bin_start, bin_end, by = bin_width)
 
 dhw_binned <- dhw_4_or_more %>%
-  mutate(bin = cut(value, breaks = breaks, right = FALSE, include.lowest = TRUE)) %>%
+  mutate(bin = cut(value,
+                   breaks = breaks,
+                   right = FALSE,
+                   include.lowest = TRUE)) %>%
   count(bin, .drop = FALSE) %>%
   mutate(
     bin_left = breaks[-length(breaks)],
@@ -313,14 +332,12 @@ dhw_binned <- dhw_4_or_more %>%
 
 # Create the histogram using plotly (as a bar chart on pre-binned data)
 dhwAggHist <-
-  plot_ly(data = dhw_binned,
-          x = ~bin_left + bin_width / 2,  # plot at bin midpoint
-          y = ~n,
-          type = 'bar',
-          width = bin_width * 0.9,
-          marker = list(color = ~bin_color),
-          height = 450,
-          hovertemplate = "Bin: %{x} DHW<br>%{y} surveys<extra></extra>") %>%
+  plot_ly(data = dhw_binned, height = 450) %>%
+  add_bars(x = ~bin_left + bin_width / 2,  # plot at bin midpoint
+           y = ~n,
+           width = bin_width * 0.9,        # bar width in x-axis units (trace attribute)
+           marker = list(color = ~bin_color),
+           hovertemplate = "Bin: %{x} DHW<br>%{y} surveys<extra></extra>") %>%
   config(displayModeBar = TRUE,
          displaylogo = FALSE,
          modeBarButtonsToRemove = c('zoom','pan', 'select', 'zoomIn', 'zoomOut',
@@ -352,28 +369,29 @@ dhwAggHist <-
          margin = list(t = 50, b = 75))
 
 dhwAggHist
-
 ```
 
 ## Exposure to DHW by coral cover
 
 ```{r coral-cover-dhw}
-coral_data_with_covariate <- coral_data %>% 
-  left_join(max_dhw_summary)
+#First make sure there are no duplicates in the max_dhw_summary data to join
+max_dhw_summary_join <- max_dhw_summary |>
+  filter(n_dates != 0) |> #get rid of any without data
+  select(site, sample_date, covariate, value) |> 
+  distinct() |> 
+  group_by(site, sample_date, covariate) |> 
+  summarise(value = mean(value)) |> 
+  ungroup()
 
-#deal with duplicates 
-coral_data_with_covariate <- coral_data_with_covariate %>% 
-  group_by(project, 
-           country, 
-           site, 
-           latitude, 
-           longitude, 
-           sample_date,
-           covariate) %>% 
-  summarize(hard_coral_cover = mean(hard_coral_cover), 
-            value = mean(value))
+#Also remove duplicates in the coral data
+coral_data_join <- coral_data |> 
+  distinct() |> 
+  group_by(project, country, site, latitude, longitude, sample_date) |> 
+  summarise(hard_coral_cover = mean(hard_coral_cover)) |> 
+  ungroup()
 
-coral_data_with_covariate
+coral_data_with_covariate <- coral_data_join %>% 
+  left_join(max_dhw_summary_join)
 
 # Determine y-axis max to size the top band appropriately
 y_max <- max(coral_data_with_covariate$value, na.rm = TRUE) * 1.05

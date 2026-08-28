@@ -42,7 +42,6 @@ library(tidyverse)
 library(mermaidr)
 library(plotly)
 library(DT)
-library(sf)
 
 # Install mermaidr.covariates (if needed)
 # remotes::install_github("data-mermaid/mermaidr-covariates")
@@ -205,41 +204,27 @@ datatable(
 
 #### Extract and spatial join MEOW boundaries (vector)
 
-Vector covariates such as MEOW are normally attached with [`attach_covariate_data()`](https://data-mermaid.github.io/mermaidr-covariates/reference/attach_covariate_data.html), which matches each sample event to the polygon containing it in a single call.
+Vector covariates such as MEOW are attached with [`attach_covariate_data()`](https://data-mermaid.github.io/mermaidr-covariates/reference/attach_covariate_data.html), which matches each sample event to the polygon containing it in a single call. This is a location-based join, so no date window is involved. Use [`list_datasets_for_covariate()`](https://data-mermaid.github.io/mermaidr-covariates/reference/list_datasets_for_covariate.html) to see which columns a vector covariate offers.
 
-**Note (August 2026):** that route is temporarily unavailable here. The covariate parquet now uses DuckDB's native spatial geometry with CRS type modifiers, which requires DuckDB 1.5 or later; on R 4.3 the newest available Windows binary is DuckDB 1.2.1, which cannot read it. Until that is resolved, the chunk below joins against a local copy of the MEOW realm polygons stored in `data/realms.RData`. The intended covariate-based code is kept commented out so it can be restored once DuckDB 1.5 is available.
+Note that this reads the covariate through DuckDB and needs the `duckdb` package at version 1.5 or later, since the covariate parquet uses native spatial geometry with CRS type modifiers. On Windows that in turn needs R 4.5 or newer, because CRAN only builds binaries for the current and previous R releases.
 
 ```{r extract-join-vector}
 #| results: asis
-# --- Preferred route, once DuckDB >= 1.5 is available -----------------------
-# meow_covariate <- covariates_df %>%
-#   filter(id == "meow_boundaries") %>%
-#   pull(title)
-#
-# coral_meow <- coral_data %>%
-#   attach_covariate_data(covariate = meow_covariate, columns = "REALM") %>%
-#   rename(realm = REALM)
-# ---------------------------------------------------------------------------
+# Look the covariate up by its id so that a change to its title upstream
+# cannot silently break this document.
+meow_covariate <- covariates_df %>%
+  filter(id == "meow_boundaries") %>%
+  pull(title)
 
-# Temporary fallback: join against the MEOW realm polygons stored locally.
-load(here::here("data", "realms.RData"))   # provides `realms`, an sp object
-
-meow_realms <- realms %>%
-  st_as_sf() %>%
-  st_set_crs(4326) %>%       # already WGS84; label it cleanly so st_join matches
-  st_make_valid() %>%
-  select(REALM)
-
-# Turn off S2 - spherical geometry errors on these polygons
-invisible(sf_use_s2(FALSE))
-
+# `columns` currently accepts only ONE column - the package validates it with
+# `col %in% ...` inside an `if()`, so passing a vector errors with "the
+# condition has length > 1". Realm is the only MEOW field used here.
+# MEOW column names are upper case; rename to match the rest of this document.
 coral_meow <- coral_data %>%
-  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
-  st_join(meow_realms, join = st_intersects) %>%
-  # put latitude / longitude back as plain columns
-  mutate(longitude = st_coordinates(.)[, 1],
-         latitude  = st_coordinates(.)[, 2]) %>%
-  st_drop_geometry() %>%
+  attach_covariate_data(
+    covariate = meow_covariate,
+    columns = "REALM"
+  ) %>%
   rename(realm = REALM)
 
 # Determine if any of the sample events do not have a realm assigned and, if so, remove.
@@ -605,7 +590,7 @@ This analysis uses:
 - **MERMAID data:** Global benthic sample events (all protocols) accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
 - **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
   - SST data: Daily Global 5km Satellite Sea Surface Temperature (CoralTemp), the maximum over the 365 days prior to each survey date, spatially averaged within a 1 km radius
-  - Marine realms: Marine Ecoregions of the World (MEOW) classification. Currently read from a local copy in `data/realms.RData`; see the note above.
+  - Marine realms: Marine Ecoregions of the World (MEOW) classification, attached by location with `attach_covariate_data()`
 
 ## Session Info
 

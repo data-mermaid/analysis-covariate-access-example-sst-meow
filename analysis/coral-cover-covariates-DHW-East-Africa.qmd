@@ -2,9 +2,9 @@
 title: "Connecting MERMAID ecological data with covariates example"
 subtitle: "Exploring relationships between hard coral cover and DHW in East Africa"
 author:
+  - name: Emily Darling
   - name: Iain R. Caldwell
   - name: Sharla Gelfand
-  - name: Emily Darling
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 format:
   html:
@@ -45,14 +45,10 @@ library(tidyverse)
 library(mermaidr)
 library(plotly)
 library(DT)
-library(rstac)
-library(geoarrow)
-library(arrow)
-library(sf)
 library(janitor)
 
 # Install mermaidr.covariates (if needed)
-remotes::install_github("data-mermaid/mermaidr-covariates")
+# remotes::install_github("data-mermaid/mermaidr-covariates")
 
 library(mermaidrcovariates)
 
@@ -69,7 +65,13 @@ status_msg <- function(..., color = "#006400") {
   )
 }
 
-# Set this to TRUE to force re-download of MEOW boundaries
+# Show file paths relative to the project root, so local absolute paths
+# (C:/Users/.../) don't end up in the rendered HTML.
+rel_path <- function(path) {
+  sub(paste0(here::here(), "/"), "", path, fixed = TRUE)
+}
+
+# Set this to TRUE to force re-download of covariates
 force_download <- FALSE
 ```
 
@@ -83,9 +85,10 @@ Export all publicly available benthic PIT summary sample events from MERMAID.
 # Get all public benthic PIT data at the sample event level
 mermaid_summ_ses_path <- here::here("data", "mermaid_summ_ses.rds")
 
-if (file.exists(mermaid_summ_ses_path)) {
+if (file.exists(mermaid_summ_ses_path) && !force_download) {
   mermaid_summ_ses <- readRDS(mermaid_summ_ses_path)
-  status_msg("Loaded cached summary sample events from", mermaid_summ_ses_path,
+  status_msg("Loaded cached summary sample events from",
+             rel_path(mermaid_summ_ses_path),
              color = "#4682B4")
 } else {
   mermaid_summ_ses <- mermaid_get_summary_sampleevents()
@@ -251,13 +254,12 @@ covars_path <- here::here("data", "coral_data_dhw_30days.rds")
 # Start timer
 start_time <- Sys.time()
 
-if (file.exists(covars_path)) {
-  
+if (file.exists(covars_path) && !force_download) {
   coral_data_dhw <- readRDS(covars_path)
-  status_msg("Loaded cached DHW data from", covars_path, color = "#4682B4")
-  
+  status_msg("Loaded cached DHW data from",
+             rel_path(covars_path),
+             color = "#4682B4")
 } else {
-  
   coral_data_dhw <- coral_data %>%
     mermaidrcovariates::get_zonal_statistics(
       covariate = dhw_covariate,
@@ -268,7 +270,6 @@ if (file.exists(covars_path)) {
   dir.create(dirname(covars_path), showWarnings = FALSE, recursive = TRUE)
   
   saveRDS(coral_data_dhw, covars_path)
-  
 }
 
 # Calculate elapsed time

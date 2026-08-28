@@ -42,9 +42,6 @@ library(tidyverse)
 library(mermaidr)
 library(plotly)
 library(DT)
-library(rstac)
-library(geoarrow)
-library(arrow)
 library(sf)
 
 # Install mermaidr.covariates (if needed)
@@ -208,88 +205,49 @@ datatable(
 
 #### Extract and spatial join MEOW boundaries (vector)
 
-Currently the only way to extract vector data is to use the links that are listed with the covariates. Here is an example of how to do that.
+Vector covariates such as MEOW are normally attached with [`attach_covariate_data()`](https://data-mermaid.github.io/mermaidr-covariates/reference/attach_covariate_data.html), which matches each sample event to the polygon containing it in a single call.
+
+**Note (August 2026):** that route is temporarily unavailable here. The covariate parquet now uses DuckDB's native spatial geometry with CRS type modifiers, which requires DuckDB 1.5 or later; on R 4.3 the newest available Windows binary is DuckDB 1.2.1, which cannot read it. Until that is resolved, the chunk below joins against a local copy of the MEOW realm polygons stored in `data/realms.RData`. The intended covariate-based code is kept commented out so it can be restored once DuckDB 1.5 is available.
 
 ```{r extract-join-vector}
 #| results: asis
-#| warning: false
-# Define the expected file path
-meow_file <- "assets/3e410700-2e6a-4b44-a2d3-1d829d19acb0/66b286f6-9085-488a-ba93-159c1b76ccd5/data_meow_boundaries.geoparquet"
+# --- Preferred route, once DuckDB >= 1.5 is available -----------------------
+# meow_covariate <- covariates_df %>%
+#   filter(id == "meow_boundaries") %>%
+#   pull(title)
+#
+# coral_meow <- coral_data %>%
+#   attach_covariate_data(covariate = meow_covariate, columns = "REALM") %>%
+#   rename(realm = REALM)
+# ---------------------------------------------------------------------------
 
-# Check if file exists and download if needed
-if (!file.exists(meow_file) || force_download) {
-  cat('<span style="color: #006400;">Downloading MEOW boundaries data...</span>\n\n')
-  
-  ## Get the MEOW item
-  meow_item <- stac(mermaidrcovariates:::stac_url) %>%
-    collections("3e410700-2e6a-4b44-a2d3-1d829d19acb0") %>%
-    items("66b286f6-9085-488a-ba93-159c1b76ccd5") %>%
-    get_request()
-  
-  ## Download the data
-  invisible(assets_download(meow_item, "data", overwrite = TRUE))
-  
-  cat('<span style="color: #006400;">MEOW boundaries downloaded to:', meow_file, '</span>\n\n')
-} else {
-  cat('<span style="color: #006400;">Using existing MEOW boundaries file:', meow_file, '</span>\n\n')
-}
+# Temporary fallback: join against the MEOW realm polygons stored locally.
+load(here::here("data", "realms.RData"))   # provides `realms`, an sp object
 
-## Convert to sf object
-meow_boundaries <- suppressMessages({
-  open_dataset(meow_file) %>%
-    st_as_sf() %>%
-    st_set_crs(4326)  # Set CRS to WGS84 (MEOW data is typically in WGS84)
-})
+meow_realms <- realms %>%
+  st_as_sf() %>%
+  st_set_crs(4326) %>%       # already WGS84; label it cleanly so st_join matches
+  st_make_valid() %>%
+  select(REALM)
 
-# Turn off S2 - this is needed to prevent errors
+# Turn off S2 - spherical geometry errors on these polygons
 invisible(sf_use_s2(FALSE))
 
-# Make geometries valid and only get MEOW (not PPOW)
-meow_boundaries <- suppressMessages(
-  meow_boundaries %>%
-    st_make_valid() %>% 
-    filter(type == "MEOW")
-)
+coral_meow <- coral_data %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_join(meow_realms, join = st_intersects) %>%
+  # put latitude / longitude back as plain columns
+  mutate(longitude = st_coordinates(.)[, 1],
+         latitude  = st_coordinates(.)[, 2]) %>%
+  st_drop_geometry() %>%
+  rename(realm = REALM)
 
-# Convert coral_data to sf object
-coral_sf <- suppressMessages(
-  coral_data %>%
-    st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
-)
-
-# Perform spatial join
-coral_meow <- suppressMessages(
-  coral_sf %>%
-    st_join(meow_boundaries, join = st_intersects)
-)
-
-# Convert back to a regular dataframe with lat/lon columns
-coral_meow <- coral_meow %>%
-  mutate(
-    longitude = st_coordinates(.)[,1],
-    latitude = st_coordinates(.)[,2]
-  ) %>%
-  st_drop_geometry() 
-  
 # Determine if any of the sample events do not have a realm assigned and, if so, remove.
 cat('<span style="color: #006400;">Removing', sum(is.na(coral_meow$realm)),
     'of', nrow(coral_meow), 'sample events due to missing realms</span>\n\n')
 
 coral_meow <- coral_meow %>%
   filter(!is.na(realm))
-
-# Clean up: Remove the large MEOW geoparquet file
-if (file.exists(meow_file)) {
-  file.remove(meow_file)
-  cat('<span style="color: #006400;">Removed MEOW geoparquet file to save space</span>\n\n')
-}
-
-#Optionally, remove the entire assets directory if it's empty or no longer needed
-assets_dir <- "assets/3e410700-2e6a-4b44-a2d3-1d829d19acb0/66b286f6-9085-488a-ba93-159c1b76ccd5"
-if (dir.exists(assets_dir)) {
-  unlink(assets_dir, recursive = TRUE)
-  cat('<span style="color: #006400;">Removed assets directory</span>\n\n')
-}
 ```
 
 #### Get zonal statistics for SST (raster)
@@ -300,10 +258,16 @@ The next function of interest is [get_summary_zonal_statistics](https://data-mer
 # Demonstrate the call on the first 10 sample events so the shape of the result
 # is visible. The full extraction is done in the next chunk, in batches, and
 # cached - so this example deliberately does not repeat that work.
+# Look the covariate up by id rather than typing its title, which has changed
+# upstream before.
+sst_covariate <- covariates_df %>%
+  filter(id == "daily_sst") %>%
+  pull(title)
+
 sst_example <- coral_meow %>%
   slice(1:10) %>%
   mermaidrcovariates::get_summary_zonal_statistics(
-    covariate = "Daily Sea Surface Temperature",
+    covariate = sst_covariate,
     n_days = 365,
     radius = 1000,
     spatial_stats = "mean",
@@ -356,7 +320,7 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
       batch_result <- coral_meow %>%
         slice(start:end) %>%
         mermaidrcovariates::get_summary_zonal_statistics(
-          covariate = "Daily Sea Surface Temperature",
+          covariate = sst_covariate,
           n_days = NumDays,
           radius = 1000,
           spatial_stats = "mean",
@@ -373,7 +337,7 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
           row_result <- coral_meow %>%
             slice(i) %>%
             mermaidrcovariates::get_summary_zonal_statistics(
-              covariate = "Daily Sea Surface Temperature",
+              covariate = sst_covariate,
               n_days = NumDays,
               radius = 1000,
               spatial_stats = "mean",
@@ -430,7 +394,7 @@ analysis_data <- coral_meow_sst %>%
   rename(sst_max = value) %>%
   select(project, country, site, sample_date,
          hard_coral_cover, sst_max,
-         ecoregion, realm,
+         realm,
          latitude, longitude) %>%
   filter(!is.na(sst_max) & !is.na(hard_coral_cover) & !is.na(realm))
 
@@ -640,8 +604,8 @@ This analysis uses:
 
 - **MERMAID data:** Global benthic sample events (all protocols) accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
 - **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
-  - SST data: Daily Sea Surface Temperature, the maximum over the 365 days prior to each survey date, spatially averaged within a 1 km radius
-  - Marine realms: From Marine Ecoregions of the World (MEOW) classification
+  - SST data: Daily Global 5km Satellite Sea Surface Temperature (CoralTemp), the maximum over the 365 days prior to each survey date, spatially averaged within a 1 km radius
+  - Marine realms: Marine Ecoregions of the World (MEOW) classification. Currently read from a local copy in `data/realms.RData`; see the note above.
 
 ## Session Info
 

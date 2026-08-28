@@ -282,7 +282,7 @@ if (dir.exists(assets_dir)) {
 
 #### Get zonal statistics for SST (raster)
 
-The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like SST, from the covariates. In this case, we calculate the mean SST just for a single day, as an example, but it can be used to extract data across a given number of days prior to the survey using the `n_days` argument in the function.
+The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like SST, from the covariates. In this case, we summarise SST across the 365 days prior to each sample date, as an example, but any window can be used via the `n_days` argument in the function.
 
 ```{r get-zonal-stats-standard}
 # Start timer
@@ -614,7 +614,7 @@ strongest_negative <- realm_stats %>%
 
 **Overall Pattern:**
 
-The global correlation between hard coral cover and mean SST (2-year average) is `r round(overall_cor$estimate, 3)` (p = `r format.pval(overall_cor$p.value, digits = 3)`).
+The global correlation between hard coral cover and SST (365 days prior to each survey) is `r round(overall_cor$estimate, 3)` (p = `r format.pval(overall_cor$p.value, digits = 3)`).
 
 **Realm-Specific Patterns:**
 
@@ -629,7 +629,7 @@ This analysis uses:
 
 - **MERMAID data:** Global benthic PIT sample events accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
 - **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
-  - SST data: Mean temperature over 2 years prior to survey date
+  - SST data: Daily Sea Surface Temperature over the 365 days prior to each survey date, within a 1 km radius
   - Marine realms: From Marine Ecoregions of the World (MEOW) classification
 
 ## Session Info

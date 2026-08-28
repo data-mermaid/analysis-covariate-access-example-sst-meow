@@ -1,0 +1,314 @@
+---
+title: "Mapping MERMAID survey sites by DHW exposure"
+subtitle: "Scratch document comparing plotly and leaflet, with a year selector"
+author:
+  - name: Iain R. Caldwell
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    self-contained: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor: visual
+title-block-banner: "#f0f3f5"
+title-block-banner-color: "black"
+include-after-body: "footer.html"
+editor_options: 
+  chunk_output_type: console
+---
+
+## Overview
+
+This is a **scratch comparison document**, not part of the published analysis. It maps the same Kenya and Tanzania survey sites used in `coral-cover-covariates-DHW-East-Africa.qmd`, drawn two ways so the approaches can be compared:
+
+1.  **plotly** (`scattermapbox`) - keeps the document to packages already in use.
+2.  **leaflet** - adds one package, but gives finer basemap control and nicer popups.
+
+Both use the same data and the same Degree Heating Weeks (DHW) colour banding as the figures in the main document, and both carry a **year selector** so you can show all survey years at once or isolate a single year. Because many sites were surveyed repeatedly, showing every year at once stacks markers on identical coordinates; picking one year resolves that.
+
+## Setup
+
+```{r setup}
+#| warning: false
+library(here)
+library(tidyverse)
+library(plotly)
+library(leaflet)
+library(mermaidrcovariates)
+
+theme_set(theme_minimal(base_size = 12))
+
+# Same status-message helper used in the main document
+status_msg <- function(..., color = "#006400") {
+  knitr::asis_output(
+    paste0('<span style="color: ', color, ';">', paste(...), '</span>\n\n')
+  )
+}
+
+rel_path <- function(path) {
+  sub(paste0(here::here(), "/"), "", path, fixed = TRUE)
+}
+
+# DHW bands - single source of truth, matching the main document's figures.
+# Green below 4, orange 4 to 8, red above 8.
+dhw_bands <- c("< 4 DHW"   = "#277d1d",
+               "4 - 8 DHW" = "#f3a224",
+               "> 8 DHW"   = "#d13823")
+```
+
+## Data
+
+This document reads the cached DHW extraction rather than re-querying the API, so it renders in seconds. That one file already carries the survey metadata, coordinates and coral cover alongside the covariate, so nothing else needs loading.
+
+```{r load-data}
+covars_path <- here::here("data", "coral_data_dhw_30days.rds")
+
+if (!file.exists(covars_path)) {
+  stop("Cached DHW data not found at ", covars_path,
+       ". Render coral-cover-covariates-DHW-East-Africa.qmd first to create it.")
+}
+
+coral_data_dhw <- readRDS(covars_path)
+
+status_msg("Loaded cached DHW data from", rel_path(covars_path), color = "#4682B4")
+```
+
+Reduce the 30-day series to the peak DHW per survey, and de-duplicate, exactly as the main document does, so the values shown here match its scatter plot. A `year` column is added for the selectors.
+
+```{r build-map-data}
+max_dhw_summary_join <- coral_data_dhw %>%
+  summarise_zonal_statistics("max") %>%
+  select(site, sample_date, summary_zonal_statistics) %>%
+  unnest(summary_zonal_statistics) %>%
+  filter(n_dates != 0) %>%
+  select(site, sample_date, value) %>%
+  distinct() %>%
+  group_by(site, sample_date) %>%
+  summarise(value = mean(value), .groups = "drop")
+
+coral_data_join <- coral_data_dhw %>%
+  select(project, country, site, latitude, longitude, sample_date, hard_coral_cover) %>%
+  distinct() %>%
+  group_by(project, country, site, latitude, longitude, sample_date) %>%
+  summarise(hard_coral_cover = mean(hard_coral_cover), .groups = "drop")
+
+map_data <- coral_data_join %>%
+  left_join(max_dhw_summary_join, by = c("site", "sample_date")) %>%
+  filter(!is.na(value), !is.na(latitude), !is.na(longitude)) %>%
+  mutate(
+    year       = lubridate::year(sample_date),
+    dhw_band   = cut(value,
+                     breaks = c(-Inf, 4, 8, Inf),
+                     labels = names(dhw_bands),
+                     right  = FALSE),
+    band_color = unname(dhw_bands[as.character(dhw_band)]),
+    hover_text = paste0(site, ", ", country,
+                        "<br>", format(sample_date, "%b %d, %Y"),
+                        "<br>Max DHW: ", round(value, 1),
+                        "<br>Hard coral cover: ", round(hard_coral_cover, 1), "%")
+  )
+
+# Years present in the data, used to build both selectors
+map_years <- sort(unique(map_data$year))
+
+status_msg("Mapping", nrow(map_data), "surveys at",
+           dplyr::n_distinct(map_data$site), "sites across",
+           length(map_years), "years (", min(map_years), "-", max(map_years), ")")
+```
+
+## Option 1: plotly
+
+plotly handles this with a `updatemenus` dropdown that switches which traces are visible. The markers are split into one trace per year, and three data-free "legend only" traces carry the DHW colour key so it stays put whichever year is selected.
+
+Uses `scattermapbox`, which needs no Mapbox token as long as the style is one of the free options (`open-street-map`, `carto-positron`, `white-bg`).
+
+```{r map-plotly}
+n_legend <- length(dhw_bands)
+n_years  <- length(map_years)
+
+dhwMapPlotly <- plot_ly(height = 600)
+
+# Legend-only traces: no data, always visible, purely to show the colour key
+for (b in names(dhw_bands)) {
+  dhwMapPlotly <- dhwMapPlotly %>%
+    add_trace(type = "scattermapbox", mode = "markers",
+              lat = NA, lon = NA,
+              marker = list(size = 10, color = unname(dhw_bands[b])),
+              name = b, showlegend = TRUE, hoverinfo = "skip")
+}
+
+# One trace per year, coloured point-by-point using the band palette
+for (y in map_years) {
+  d <- map_data %>% filter(year == y)
+  dhwMapPlotly <- dhwMapPlotly %>%
+    add_trace(type = "scattermapbox", mode = "markers",
+              lat = d$latitude, lon = d$longitude,
+              marker = list(size = 9, opacity = 0.8, color = d$band_color),
+              text = d$hover_text,
+              hovertemplate = "%{text}<extra></extra>",
+              name = as.character(y), showlegend = FALSE)
+}
+
+# Dropdown: "All years" plus one entry per year.
+# Each button sets the `visible` flag for every trace, in order.
+year_buttons <- list(
+  list(method = "restyle", label = "All years",
+       args = list("visible", c(rep(TRUE, n_legend), rep(TRUE, n_years))))
+)
+
+for (i in seq_along(map_years)) {
+  vis <- c(rep(TRUE, n_legend), rep(FALSE, n_years))
+  vis[n_legend + i] <- TRUE
+  year_buttons <- c(year_buttons,
+                    list(list(method = "restyle",
+                              label = as.character(map_years[i]),
+                              args = list("visible", vis))))
+}
+
+dhwMapPlotly <- dhwMapPlotly %>%
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c("select", "lasso2d",
+                                    "hoverClosestCartesian",
+                                    "hoverCompareCartesian")) %>%
+  layout(
+    mapbox = list(
+      style  = "open-street-map",
+      center = list(lat = mean(map_data$latitude, na.rm = TRUE),
+                    lon = mean(map_data$longitude, na.rm = TRUE)),
+      zoom   = 5
+    ),
+    legend = list(title = list(text = "<b>Max DHW</b>"),
+                  x = 0.01, y = 0.99,
+                  bgcolor = "rgba(255,255,255,0.8)"),
+    updatemenus = list(
+      list(type = "dropdown", direction = "down", showactive = TRUE,
+           x = 1, xanchor = "right", y = 1.10, yanchor = "top",
+           buttons = year_buttons)
+    ),
+    annotations = list(
+      list(x = 0, y = 1.14, text = "SURVEY SITES BY HEAT STRESS", showarrow = FALSE,
+           xref = "paper", yref = "paper", xanchor = "left", yanchor = "top",
+           font = list(size = 20)),
+      list(x = 0, y = 1.06,
+           text = paste0(nrow(map_data), " surveys, ", n_years, " years"),
+           showarrow = FALSE,
+           xref = "paper", yref = "paper", xanchor = "left", yanchor = "top",
+           font = list(size = 12))
+    ),
+    margin = list(t = 95, b = 10, l = 10, r = 10)
+  )
+
+dhwMapPlotly
+```
+
+If the tiles fail to load (offline, or a blocked network), swap `type = "scattermapbox"` for `type = "scattergeo"` and replace the `mapbox` list with `geo = list(scope = "africa", resolution = 50, showland = TRUE)`. That draws built-in coastlines instead of fetching tiles.
+
+## Option 2: leaflet
+
+leaflet does this through layer groups. Each year is added as its own group, plus an "All years" group holding everything, and `addLayersControl()` exposes them as radio buttons. Listing them as `baseGroups` rather than `overlayGroups` makes the choice exclusive, so exactly one option is shown at a time.
+
+```{r map-leaflet}
+pal <- colorFactor(palette = unname(dhw_bands),
+                   levels  = names(dhw_bands))
+
+# Basemap. addTiles() is plain OpenStreetMap - always free, never needs a key.
+# CARTO and Stadia/Stamen basemaps now require registration and render tiles
+# stamped "API key required". Free alternatives (swap the line below):
+#   addProviderTiles(providers$Esri.OceanBasemap)    # bathymetry - good for reefs
+#   addProviderTiles(providers$Esri.WorldImagery)    # satellite
+#   addProviderTiles(providers$OpenTopoMap)
+dhwMapLeaflet <- leaflet() %>%
+  addTiles()
+
+# "All years" group - every survey at once
+dhwMapLeaflet <- dhwMapLeaflet %>%
+  addCircleMarkers(
+    data        = map_data,
+    lng         = ~longitude, lat = ~latitude,
+    radius      = 6, color = "black", weight = 1, opacity = 0.9,
+    fillColor   = ~pal(dhw_band), fillOpacity = 0.8,
+    popup       = ~hover_text,
+    group       = "All years"
+  )
+
+# One group per year
+for (y in map_years) {
+  dhwMapLeaflet <- dhwMapLeaflet %>%
+    addCircleMarkers(
+      data        = map_data %>% filter(year == y),
+      lng         = ~longitude, lat = ~latitude,
+      radius      = 6, color = "black", weight = 1, opacity = 0.9,
+      fillColor   = ~pal(dhw_band), fillOpacity = 0.8,
+      popup       = ~hover_text,
+      group       = as.character(y)
+    )
+}
+
+dhwMapLeaflet <- dhwMapLeaflet %>%
+  addLayersControl(
+    baseGroups = c("All years", as.character(map_years)),
+    options    = layersControlOptions(collapsed = TRUE)
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal      = pal,
+    values   = map_data$dhw_band,
+    title    = "Max DHW<br>(30 days pre-survey)",
+    opacity  = 0.9
+  ) %>%
+  hideGroup(as.character(map_years))   # start on "All years"
+
+dhwMapLeaflet
+```
+
+`collapsed = TRUE` keeps the year list as a small hover-to-expand box, which matters when there are many years. Set it to `FALSE` to pin the full list open.
+
+A note on basemaps: several tile providers that used to be open now require registration. CARTO (`CartoDB.Positron`) and the former Stamen maps (now served by Stadia) both return tiles stamped "API key required" if you have not registered one. Plain `addTiles()` uses OpenStreetMap directly and never needs a key, and the Esri basemaps listed in the code above are also key-free. This is a property of the tile service, not of leaflet - the plotly map would hit exactly the same wall if its `style` were set to a Mapbox-hosted style rather than `open-street-map`.
+
+## Optional: one marker per site
+
+The year selector solves overlap *within* a year, but sites surveyed repeatedly still stack under "All years". If you would rather collapse to one marker per site showing the worst DHW ever recorded there, use this instead of the year selector - note it removes the year dimension entirely, so the selectors above no longer apply.
+
+```{r optional-site-level}
+# site_data <- map_data %>%
+#   group_by(project, country, site, latitude, longitude) %>%
+#   summarise(value = max(value),
+#             hard_coral_cover = mean(hard_coral_cover),
+#             n_surveys = n(),
+#             first_year = min(year), last_year = max(year),
+#             .groups = "drop") %>%
+#   mutate(
+#     dhw_band   = cut(value, breaks = c(-Inf, 4, 8, Inf),
+#                      labels = names(dhw_bands), right = FALSE),
+#     band_color = unname(dhw_bands[as.character(dhw_band)]),
+#     hover_text = paste0(site, ", ", country,
+#                         "<br>", n_surveys, " surveys (",
+#                         first_year, " - ", last_year, ")",
+#                         "<br>Peak DHW: ", round(value, 1))
+#   )
+```
+
+## Things to compare
+
+- **How the selector is built** - plotly needs the traces and the `visible` vectors assembled by hand; leaflet gets it from `group =` plus one `addLayersControl()` call. leaflet is markedly less code for the same result.
+- **Dependencies** - plotly is already loaded for every other figure; leaflet is one more package (plus `leaflet.providers` for the basemap choice). For a document others are meant to copy and run, that difference counts for more than it would in private work.
+- **Basemap licensing** - both libraries depend on a third-party tile service, and both are fine as long as you stay on OpenStreetMap or Esri. Neither is inherently more restricted than the other.
+- **Zoom and pan** - leaflet handles dense coastal clusters more gracefully, and supports marker clustering via `clusterOptions = markerClusterOptions()` if overlap is still distracting under "All years".
+- **Popups vs hover** - leaflet popups are click-to-open and can hold arbitrary HTML; plotly hover labels appear on mouseover and suit quick scanning.
+- **Consistency** - the plotly version shares the modebar, fonts and legend styling of the other figures in the main document, so it blends in better visually.
+- **File size** - both duplicate the markers once per year group, so check the rendered HTML both ways given `embed-resources: true`.
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```

@@ -8,8 +8,10 @@ editor: visual
 
 **WCS MERMAID Covariates Examples**
 
-- [Coral cover covariates analysis example webpage](coral-cover-covariates-analysis.html) (rendered html)
+- [Coral cover and sea surface temperature across marine realms](coral-cover-covariates-analysis.html) - global surveys, SST and MEOW realms
 
-- [DHW East Africa example](coral-cover-covariates-DHW-East-Africa.html) (2nd rendered html)
+- [Coral cover and Degree Heating Weeks in East Africa](coral-cover-covariates-DHW-East-Africa.html) - Kenya and Tanzania surveys and heat stress exposure
+
+- [Mapping survey sites by DHW exposure](map-comparison-DHW-East-Africa.html) - two ways of mapping the same data, with plotly and with leaflet
 
 - [Repository](https://github.com/data-mermaid/analysis-covariate-access-example-sst-meow)

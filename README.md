@@ -14,7 +14,8 @@ covariates to the survey locations and dates, and produce interactive figures.
 | --- | --- |
 | [Coral cover and sea surface temperature across marine realms](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/coral-cover-covariates-analysis.html) | Global surveys, SST, and Marine Ecoregions of the World (MEOW) realms |
 | [Coral cover and Degree Heating Weeks in East Africa](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/coral-cover-covariates-DHW-East-Africa.html) | Kenya and Tanzania surveys and heat stress exposure |
-| [Index page](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/) | Links to both of the above |
+| [Mapping survey sites by DHW exposure](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/map-comparison-DHW-East-Africa.html) | Two ways of mapping the same data, with plotly and with leaflet |
+| [Index page](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/) | Links to all of the above |
 
 The rendered HTML in `docs/` is what GitHub Pages serves, so it is committed to the
 repository rather than ignored.
@@ -52,11 +53,31 @@ in the month before each survey.
   survey was exposed to.
 - Outputs: a hard coral cover histogram, a DHW histogram restricted to surveys exceeding
   4 DHW, a coral-cover-vs-DHW scatter with the 4 and 8 DHW bleaching thresholds shaded,
-  and the same relationship faceted by year for years that saw heat stress.
+  the same relationship faceted by year for years that saw heat stress, and an interactive
+  map of the survey sites with a dropdown to isolate a single survey year.
+- Thresholds and colours are defined once in the setup chunk (`alert_1`, `alert_2`,
+  `col_red`, `col_amber`, `col_green`), so every figure uses the same values.
+
+### 3. Mapping the same data two ways
+
+`analysis/map-comparison-DHW-East-Africa.qmd`
+
+A short supporting document rather than a new analysis. It reads the cached DHW extraction
+from example 2 and maps those survey sites twice - once with **plotly** (`scattermapbox`)
+and once with **leaflet** - using identical data and the same DHW colour banding, so the
+two libraries can be compared directly.
+
+Both maps carry a year selector, built quite differently: plotly needs one trace per year
+plus hand-assembled `visible` vectors driven by an `updatemenus` dropdown, while leaflet
+gets the same behaviour from `group =` and a single `addLayersControl()` call. The document
+also notes which basemaps are free to use - CARTO and Stadia now require an API key, while
+OpenStreetMap and the Esri basemaps do not.
+
+Because it reads the cache rather than the API, it renders in seconds.
 
 ## Covariate access pattern
 
-Both documents follow the same three steps from `mermaidrcovariates`:
+The two analysis documents follow the same three steps from `mermaidrcovariates`:
 
 1. [`list_covariates()`](https://data-mermaid.github.io/mermaidr-covariates/reference/list_covariates.html)
    to see what is available and to look up a covariate's full title from its id.
@@ -71,10 +92,11 @@ Both documents follow the same three steps from `mermaidrcovariates`:
 ```
 analysis/
   _quarto.yml                                  Quarto project; renders to ../docs
-  index.qmd                                    Landing page linking both documents
+  index.qmd                                    Landing page linking the documents
   coral-cover-covariates-analysis.qmd          Example 1 (SST and MEOW realms)
   coral-cover-covariates-DHW-East-Africa.qmd   Example 2 (DHW, East Africa)
-  footer.html                                  MERMAID logo footer, included in both
+  map-comparison-DHW-East-Africa.qmd           Example 3 (plotly vs leaflet mapping)
+  footer.html                                  MERMAID logo footer, included in all
   2021MERMAIDLogoBlueTransp.png                Logo used by the footer
   draft/                                       Earlier working version of example 2
 data/                                          Cached data (see below)
@@ -105,16 +127,18 @@ R, [Quarto](https://quarto.org/), and:
 
 ```r
 install.packages(c("here", "tidyverse", "mermaidr", "plotly", "DT", "janitor",
-                   "rstac", "geoarrow", "arrow", "sf"))
+                   "rstac", "geoarrow", "arrow", "sf", "leaflet"))
 
 # mermaidrcovariates is not on CRAN
 remotes::install_github("data-mermaid/mermaidr-covariates")
 ```
 
-Only the SST example needs the spatial stack (`rstac`, `geoarrow`, `arrow`, `sf`); the DHW
-example runs without them. Note that `sf` requires GDAL, GEOS and PROJ on your system.
+Not every document needs everything. Only the SST example needs the spatial stack
+(`rstac`, `geoarrow`, `arrow`, `sf`) - note that `sf` requires GDAL, GEOS and PROJ on your
+system - and only the mapping comparison needs `leaflet`. The DHW example runs without
+either.
 
-Both examples use only publicly available MERMAID data, so no API token is needed.
+All documents use only publicly available MERMAID data, so no API token is needed.
 
 ## Reproducing
 
@@ -129,6 +153,9 @@ Output is written to `docs/`, as configured in `analysis/_quarto.yml`.
 
 To force a fresh download instead of using the cache, delete the relevant file from
 `data/`.
+
+Note that `map-comparison-DHW-East-Africa.qmd` reads the cache created by
+`coral-cover-covariates-DHW-East-Africa.qmd`, so render that one first on a fresh clone.
 
 ## License
 

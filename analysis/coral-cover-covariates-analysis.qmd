@@ -30,13 +30,14 @@ This analysis explores the relationship between hard coral cover and sea surface
 
 **Key questions:**
 
-- How does hard coral cover vary with mean SST?
+- How does hard coral cover vary with maximum SST?
 - Do these relationships differ across marine biogeographic realms?
 
 ## Setup
 
 ```{r setup}
 #| warning: false
+library(here)
 library(tidyverse)
 library(mermaidr)
 library(plotly)
@@ -54,7 +55,7 @@ library(mermaidrcovariates)
 # Set theme for ggplot
 theme_set(theme_minimal(base_size = 12))
 
-# Set this to TRUE to force re-download of MEOW boundaries
+# Set this to TRUE to re-download everything instead of using the cached files
 force_download <- FALSE
 ```
 
@@ -62,12 +63,23 @@ force_download <- FALSE
 
 ### MERMAID Benthic Data
 
-Export all publicly available benthic PIT summary sample events from MERMAID.
+Export all publicly available summary sample events from MERMAID.
 
 ```{r get-mermaid-data}
 #| results: asis
-# Get all public benthic PIT data at the sample event level
-mermaid_summ_ses <- mermaid_get_summary_sampleevents() 
+# Get all public benthic data at the sample event level (all protocols).
+# Cached to data/ on first render. This is the same global export the DHW
+# example saves before filtering it, so the two documents share one file.
+mermaid_summ_ses_path <- here::here("data", "mermaid_summ_ses.rds")
+
+if (file.exists(mermaid_summ_ses_path) && !force_download) {
+  mermaid_summ_ses <- readRDS(mermaid_summ_ses_path)
+  cat('<span style="color: #4682B4;">Loaded cached sample events from data/mermaid_summ_ses.rds</span>\n\n')
+} else {
+  mermaid_summ_ses <- mermaid_get_summary_sampleevents()
+  dir.create(dirname(mermaid_summ_ses_path), showWarnings = FALSE, recursive = TRUE)
+  saveRDS(mermaid_summ_ses, mermaid_summ_ses_path)
+}
 
 # Check how many sample events we have
 cat('<span style="color: #006400;">Total sample events:', nrow(mermaid_summ_ses), '</span>\n\n')
@@ -282,13 +294,14 @@ if (dir.exists(assets_dir)) {
 
 #### Get zonal statistics for SST (raster)
 
-The next function of interest is [get_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html), which can be used to extract raster data, like SST, from the covariates. In this case, we summarise SST across the 365 days prior to each sample date, as an example, but any window can be used via the `n_days` argument in the function.
+The next function of interest is [get_summary_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_summary_zonal_statistics.html), which extracts raster data like SST and reduces it to one value per survey in a single step. Here we take the **maximum** daily SST across the 365 days prior to each sample date (`temporal_stats = "max"`), spatially averaged within a 1 km radius (`spatial_stats = "mean"`). Any window can be used via the `n_days` argument. The chunk below runs it on the first 10 sample events to show what comes back; the full global extraction follows in the next chunk.
 
 ```{r get-zonal-stats-standard}
-# Start timer
-start_time <- Sys.time()
-
-coral_meow_sst <- coral_meow %>%
+# Demonstrate the call on the first 10 sample events so the shape of the result
+# is visible. The full extraction is done in the next chunk, in batches, and
+# cached - so this example deliberately does not repeat that work.
+sst_example <- coral_meow %>%
+  slice(1:10) %>%
   mermaidrcovariates::get_summary_zonal_statistics(
     covariate = "Daily Sea Surface Temperature",
     n_days = 365,
@@ -296,14 +309,7 @@ coral_meow_sst <- coral_meow %>%
     spatial_stats = "mean",
     temporal_stats = "max")
 
-# Calculate elapsed time
-end_time <- Sys.time()
-elapsed_time <- end_time - start_time
-
-# Print the result
-cat('<span style="color: #006400;">Data retrieval completed in:',
-    round(elapsed_time, 2), attr(elapsed_time, "units"), '</span>\n\n')
-
+sst_example
 ```
 
 ```{r get-zonal-stats-batches-checks-save}
@@ -311,8 +317,10 @@ cat('<span style="color: #006400;">Data retrieval completed in:',
 NumSe <- nrow(coral_meow)
 NumDays <- 365
 
-# Define the file path for saved data
-data_dir <- "../data"
+# Define the file path for saved data. here::here() anchors this to the
+# project's own data/ folder whether the code is run from a chunk, from the
+# console, or during a render.
+data_dir <- here::here("data")
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE)
 }
@@ -416,12 +424,15 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
 #| results: asis
 #Get rid of rows with NAs, select specific columns, and rename to more appropriate titles
 analysis_data <- coral_meow_sst %>%
-  rename(sst_mean = value) %>%
+  # temporal_stats = "max" above means this is the highest daily SST in the
+  # 365 days before each survey, spatially averaged within 1 km - a maximum,
+  # not a mean, so name it accordingly.
+  rename(sst_max = value) %>%
   select(project, country, site, sample_date,
-         hard_coral_cover, sst_mean,
+         hard_coral_cover, sst_max,
          ecoregion, realm,
          latitude, longitude) %>%
-  filter(!is.na(sst_mean) & !is.na(hard_coral_cover) & !is.na(realm))
+  filter(!is.na(sst_max) & !is.na(hard_coral_cover) & !is.na(realm))
 
 cat('<span style="color: #006400;">Number of SEs without NAs: ',
       nrow(analysis_data), '</span>\n\n')
@@ -441,8 +452,8 @@ realm_summary <- analysis_data %>%
     n_sites = n_distinct(site),
     mean_coral_cover = mean(hard_coral_cover, na.rm = T),
     sd_coral_cover = sd(hard_coral_cover, na.rm = T),
-    mean_sst = mean(sst_mean, na.rm = T),
-    sd_sst = sd(sst_mean, na.rm = T),
+    mean_max_sst = mean(sst_max, na.rm = T),
+    sd_max_sst = sd(sst_max, na.rm = T),
     .groups = "drop"
   ) %>%
   arrange(desc(n_samples))
@@ -455,7 +466,7 @@ datatable(
 ) %>%
   formatRound(columns = c("mean_coral_cover",
                           "sd_coral_cover",
-                          "mean_sst", "sd_sst"), digits = 2)
+                          "mean_max_sst", "sd_max_sst"), digits = 2)
 ```
 
 ## Coral Cover vs. SST Analysis
@@ -465,21 +476,21 @@ datatable(
 ```{r overall-relationship}
 #| results: asis
 # Overall scatter plot
-overall_plot <- ggplot(analysis_data, aes(x = sst_mean, y = hard_coral_cover)) +
+overall_plot <- ggplot(analysis_data, aes(x = sst_max, y = hard_coral_cover)) +
   geom_point(alpha = 0.3, color = "steelblue") +
   geom_smooth(method = "lm", color = "coral", linewidth = 1) +
   labs(
-    x = "Mean SST (°C)",
+    x = "Maximum SST (°C)",
     y = "Hard Coral Cover (%)",
     title = "Hard Coral Cover vs. Sea Surface Temperature",
-    subtitle = "All marine realms combined"
+    subtitle = "Highest daily SST in the year before each survey, all marine realms"
   )
 
 ggplotly(overall_plot)
 
 # Calculate overall correlation
 overall_cor <- cor.test(
-  analysis_data$sst_mean,
+  analysis_data$sst_max,
   analysis_data$hard_coral_cover
 )
 
@@ -490,7 +501,7 @@ cat('<span style="color: #006400;">Overall correlation:', round(overall_cor$esti
 ### By Marine Realm
 
 ```{r by-realm}
-Filter to realms with sufficient sample sizes (e.g., n >= 20)
+# Filter to realms with sufficient sample sizes (e.g., n >= 20)
 min_samples <- 20
 realms_to_plot <- realm_summary %>%
   filter(n_samples >= min_samples) %>%
@@ -500,11 +511,11 @@ plot_data <- analysis_data %>%
   filter(realm %in% realms_to_plot)
 
 # Create faceted scatter plot
-realm_plot <- ggplot(plot_data, aes(x = sst_mean, y = hard_coral_cover, color = realm)) +
+realm_plot <- ggplot(plot_data, aes(x = sst_max, y = hard_coral_cover, color = realm)) +
   geom_point(alpha = 0.4) +
   geom_smooth(method = "lm", se = TRUE, linewidth = 1) +
   labs(
-    x = "Mean SST (°C)",
+    x = "Maximum SST (°C)",
     y = "Hard Coral Cover (%)",
     title = "Hard Coral Cover vs. Sea Surface Temperature by Marine Realm",
     subtitle = paste("Realms with ≥", min_samples, "samples")
@@ -522,12 +533,12 @@ realm_stats <- plot_data %>%
   group_by(realm) %>%
   summarise(
     n_samples = n(),
-    correlation = cor(sst_mean, hard_coral_cover, use = "complete.obs"),
+    correlation = cor(sst_max, hard_coral_cover, use = "complete.obs"),
     # Fit linear model
-    slope = coef(lm(hard_coral_cover ~ sst_mean))[2],
-    intercept = coef(lm(hard_coral_cover ~ sst_mean))[1],
-    r_squared = summary(lm(hard_coral_cover ~ sst_mean))$r.squared,
-    p_value = summary(lm(hard_coral_cover ~ sst_mean))$coefficients[2, 4],
+    slope = coef(lm(hard_coral_cover ~ sst_max))[2],
+    intercept = coef(lm(hard_coral_cover ~ sst_max))[1],
+    r_squared = summary(lm(hard_coral_cover ~ sst_max))$r.squared,
+    p_value = summary(lm(hard_coral_cover ~ sst_max))$coefficients[2, 4],
     .groups = "drop"
   ) %>%
   arrange(desc(abs(correlation)))
@@ -545,16 +556,16 @@ datatable(
 ### Interactive Multi-Realm Plot
 
 ```{r interactive-realm-plot}
-Create interactive plot with all realms on same axes
+# Create interactive plot with all realms on same axes
 interactive_plot <- plot_ly(data = plot_data) %>%
   add_markers(
-    x = ~sst_mean,
+    x = ~sst_max,
     y = ~hard_coral_cover,
     color = ~realm,
     colors = "Set1",
     text = ~paste(
       "Realm:", realm,
-      "<br>SST:", round(sst_mean, 2), "°C",
+      "<br>Max SST:", round(sst_max, 2), "°C",
       "<br>Coral cover:", round(hard_coral_cover, 1), "%",
       "<br>Site:", site
     ),
@@ -563,7 +574,7 @@ interactive_plot <- plot_ly(data = plot_data) %>%
   ) %>%
   layout(
     title = "Hard Coral Cover vs. SST by Marine Realm",
-    xaxis = list(title = "Mean SST (°C)"),
+    xaxis = list(title = "Maximum SST (°C)"),
     yaxis = list(title = "Hard Coral Cover (%)"),
     hovermode = "closest",
     legend = list(
@@ -578,11 +589,11 @@ for (realm_name in realms_to_plot) {
   realm_subset <- plot_data %>% filter(realm == realm_name)
 
   # Fit model
-  model <- lm(hard_coral_cover ~ sst_mean, data = realm_subset)
+  model <- lm(hard_coral_cover ~ sst_max, data = realm_subset)
 
   # Create prediction data
-  sst_range <- seq(min(realm_subset$sst_mean), max(realm_subset$sst_mean), length.out = 100)
-  predictions <- predict(model, newdata = data.frame(sst_mean = sst_range))
+  sst_range <- seq(min(realm_subset$sst_max), max(realm_subset$sst_max), length.out = 100)
+  predictions <- predict(model, newdata = data.frame(sst_max = sst_range))
 
   # Add line
   interactive_plot <- interactive_plot %>%
@@ -614,7 +625,7 @@ strongest_negative <- realm_stats %>%
 
 **Overall Pattern:**
 
-The global correlation between hard coral cover and SST (365 days prior to each survey) is `r round(overall_cor$estimate, 3)` (p = `r format.pval(overall_cor$p.value, digits = 3)`).
+The global correlation between hard coral cover and maximum SST (the hottest day in the 365 prior to each survey) is `r round(overall_cor$estimate, 3)` (p = `r format.pval(overall_cor$p.value, digits = 3)`).
 
 **Realm-Specific Patterns:**
 
@@ -627,9 +638,9 @@ The relationship between coral cover and SST varies considerably across marine r
 
 This analysis uses:
 
-- **MERMAID data:** Global benthic PIT sample events accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
+- **MERMAID data:** Global benthic sample events (all protocols) accessed via the [`mermaidr`](https://github.com/data-mermaid/mermaidr) package
 - **Environmental covariates:** Accessed via the [`mermaidrcovariates`](https://data-mermaid.github.io/mermaidr-covariates/) package
-  - SST data: Daily Sea Surface Temperature over the 365 days prior to each survey date, within a 1 km radius
+  - SST data: Daily Sea Surface Temperature, the maximum over the 365 days prior to each survey date, spatially averaged within a 1 km radius
   - Marine realms: From Marine Ecoregions of the World (MEOW) classification
 
 ## Session Info

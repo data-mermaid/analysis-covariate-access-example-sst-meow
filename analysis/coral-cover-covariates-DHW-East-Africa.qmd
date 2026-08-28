@@ -517,6 +517,12 @@ coralDhwFacetGG <-
 coralDhwFacetGG
 ```
 
+## Map sites with color coding
+
+```{r map-sites-color-dhw}
+#This block creates a map of the sites, colored by the number of DHW
+```
+
 ## Session Info
 
 ```{r session-info}

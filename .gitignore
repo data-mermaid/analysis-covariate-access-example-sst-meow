@@ -6,3 +6,5 @@
 assets/ 
 *.geoparquet
 data/*.rds
+README.html
+*.rmarkdown

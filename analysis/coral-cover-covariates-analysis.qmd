@@ -22,6 +22,8 @@ editor: visual
 title-block-banner: "#f0f3f5"
 title-block-banner-color: "black"
 include-after-body: "footer.html"
+editor_options: 
+  chunk_output_type: console
 ---
 
 ## Overview
@@ -43,8 +45,8 @@ library(mermaidr)
 library(plotly)
 library(DT)
 
-# Install mermaidr.covariates (if needed)
-remotes::install_github("data-mermaid/mermaidr-covariates")
+# # Install mermaidr.covariates (if needed)
+# remotes::install_github("data-mermaid/mermaidr-covariates")
 
 library(mermaidrcovariates)
 
@@ -262,7 +264,11 @@ data_dir <- here::here("data")
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE)
 }
-sst_data_file <- file.path(data_dir, paste0("coralMeowSstSubset_NumSe", NumSe, "_NumDays", NumDays, ".rds"))
+
+sst_data_file <- file.path(
+  data_dir,
+  paste0("coralMeowSst_", NumDays, "days_", Radius, "m.rds")
+)
 
 # Check if data already exists
 if (file.exists(sst_data_file) & force_download == FALSE) {

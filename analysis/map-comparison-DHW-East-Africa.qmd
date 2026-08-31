@@ -39,6 +39,12 @@ Both use the same data and the same Degree Heating Weeks (DHW) colour banding as
 ```{r setup}
 #| warning: false
 library(here)
+
+# Pin the project root explicitly. _quarto.yml sits in analysis/, which makes
+# that folder look like a project root, so during a render here::here() would
+# otherwise resolve to analysis/ instead of the repository root - and the
+# cached data in data/ would not be found.
+here::i_am("analysis/map-comparison-DHW-East-Africa.qmd")
 library(tidyverse)
 library(plotly)
 library(leaflet)

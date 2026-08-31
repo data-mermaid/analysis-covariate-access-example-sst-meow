@@ -40,6 +40,12 @@ This analysis explores the relationship between hard coral cover and sea surface
 ```{r setup}
 #| warning: false
 library(here)
+
+# Pin the project root explicitly. _quarto.yml sits in analysis/, which makes
+# that folder look like a project root, so during a render here::here() would
+# otherwise resolve to analysis/ instead of the repository root - and the
+# cached data in data/ would not be found.
+here::i_am("analysis/coral-cover-covariates-analysis.qmd")
 library(tidyverse)
 library(mermaidr)
 library(plotly)
@@ -272,8 +278,8 @@ sst_data_file <- file.path(
 
 # Check if data already exists
 if (file.exists(sst_data_file) & force_download == FALSE) {
-  cat('<span style="color: #006400;">Loading previously downloaded SST data from:',
-      sst_data_file, '</span>\n\n')
+  cat('<span style="color: #006400;">Loading previously downloaded SST data from: data/',
+      basename(sst_data_file), '</span>\n\n')
   coral_meow_sst <- readRDS(sst_data_file)
   cat('<span style="color: #006400;">Loaded',
       nrow(coral_meow_sst), 'SST records</span>\n\n')
@@ -362,8 +368,8 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
 
   # Save the data
   saveRDS(coral_meow_sst, sst_data_file)
-  cat('<span style="color: #006400;">Data saved to:',
-      sst_data_file, '</span>\n\n')
+  cat('<span style="color: #006400;">Data saved to: data/',
+      basename(sst_data_file), '</span>\n\n')
 }
 ```
 

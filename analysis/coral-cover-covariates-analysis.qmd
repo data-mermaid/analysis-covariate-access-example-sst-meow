@@ -253,7 +253,33 @@ sst_example <- coral_meow %>%
     radius = 1000,
     spatial_stats = "mean")
 
-head(sst_example)
+# The result holds one row per sample event, with each survey's daily series in
+# a nested list-column. Unnest a single survey to show what that series is.
+sst_example %>%
+  slice(1) %>%
+  select(site, sample_date, zonal_statistics) %>%
+  unnest(zonal_statistics) %>%
+  datatable(
+    options = list(pageLength = 5, scrollX = TRUE),
+    caption = "Daily SST for one sample event, the 365 days before its survey date",
+    rownames = FALSE
+  ) %>%
+  formatRound("value", digits = 2)
+```
+
+`summarise_zonal_statistics()` then reduces each of those series to a single value. The data is already downloaded, so this step is instant.
+
+```{r summarise-example}
+sst_example %>%
+  summarise_zonal_statistics("max") %>%
+  select(site, sample_date, summary_zonal_statistics) %>%
+  unnest(summary_zonal_statistics) %>%
+  datatable(
+    options = list(pageLength = 10, scrollX = TRUE),
+    caption = "Maximum SST for each of the 10 example sample events",
+    rownames = FALSE
+  ) %>%
+  formatRound("value", digits = 2)
 ```
 
 ```{r get-zonal-stats-batches-checks-save}

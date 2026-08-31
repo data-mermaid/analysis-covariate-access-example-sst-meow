@@ -5,14 +5,14 @@ Worked examples showing how environmental covariates can be extracted with the
 compared against coral reef survey data held in [MERMAID](https://datamermaid.org/).
 
 Each document is a self-contained, reproducible example written for the MERMAID Analysis
-Hub. All of them start from publicly available MERMAID benthic data, attach one or more
+Hub. They start from publicly available MERMAID benthic data, attach one or more
 covariates to the survey locations and dates, and produce interactive figures.
 
 ## Rendered documents
 
 | Document | Focus |
 | --- | --- |
-| [Coral cover and sea surface temperature across marine realms](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/coral-cover-covariates-analysis.html) | Global surveys, SST, and Marine Ecoregions of the World (MEOW) realms |
+| [Coral cover and sea surface temperature across marine realms](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/coral-cover-covariates-analysis.html) | Global surveys, annual maximum SST, and Marine Ecoregions of the World (MEOW) realms |
 | [Coral cover and Degree Heating Weeks in East Africa](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/coral-cover-covariates-DHW-East-Africa.html) | Kenya and Tanzania surveys and heat stress exposure |
 | [Mapping survey sites by DHW exposure](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/map-comparison-DHW-East-Africa.html) | Two ways of mapping the same data, with plotly and with leaflet |
 | [Index page](https://data-mermaid.github.io/analysis-covariate-access-example-sst-meow/) | Links to all of the above |
@@ -22,22 +22,28 @@ repository rather than ignored.
 
 ## The examples
 
-### 1. Coral cover vs. sea surface temperature, by marine realm
+### 1. Coral cover vs. maximum sea surface temperature, by marine realm
 
 `analysis/coral-cover-covariates-analysis.qmd`
 
-Uses global public benthic sample events. Survey points are spatially joined to MEOW
-realms, then daily SST is extracted for the year preceding each survey.
+Uses global public benthic sample events. Each survey is matched to the MEOW realm it sits
+in, then daily SST is extracted for the year preceding it.
 
-- Covariate (vector): MEOW boundaries, downloaded from the covariates STAC catalogue as a
-  geoparquet file, joined with `sf`, then deleted again to save space.
-- Covariate (raster): `Daily Sea Surface Temperature`, `n_days = 365`, `radius = 1000` m,
-  `spatial_stats = "mean"`.
-- Requests are sent in batches of 10 sample events, with a row-by-row fallback if a batch
-  fails, so a single bad point does not abort the whole download.
-- Outputs: a hard coral cover histogram, an overall coral-cover-vs-SST scatter with
-  correlation, the same relationship faceted by realm, per-realm correlations and linear
-  model summaries, and an interactive multi-realm plot with regression lines.
+- **Vector covariate:** `meow_boundaries`, attached with `attach_covariate_data()`, which
+  matches each sample event to the polygon containing it in one call. Only the `REALM`
+  column is requested.
+- **Raster covariate:** `daily_sst`, with `n_days = 365`, `radius = 1000` m and
+  `spatial_stats = "mean"`, then reduced with `summarise_zonal_statistics("max")`.
+  The resulting variable is the **hottest day** of the year before each survey, spatially
+  averaged within 1 km - an annual maximum, not an annual mean.
+- Requests are sent in batches of 50 sample events, each batch summarised before the next
+  is fetched, with a row-by-row fallback if a batch fails. Summarising inside the loop
+  matters: at 365 days across ~5,000 surveys the raw daily series is roughly 1.8 million
+  rows, and the reduction is per survey so the result is identical either way.
+- **Outputs:** a hard coral cover histogram; the daily series and its summarised value for
+  a worked example; an overall coral-cover-vs-SST scatter with correlation; the same
+  faceted by realm; per-realm correlations and linear model summaries; and an interactive
+  multi-realm plot with regression lines.
 
 ### 2. Coral cover vs. Degree Heating Weeks in East Africa
 
@@ -46,17 +52,16 @@ realms, then daily SST is extracted for the year preceding each survey.
 Narrows the same MERMAID export to Kenya and Tanzania and looks at accumulated heat stress
 in the month before each survey.
 
-- Covariate (raster): `Daily Global 5km Satellite Coral Bleaching Degree Heating Week`,
-  `n_days = 30`, `radius = 1000` m, `spatial_stats = "mean"`. The covariate's full title is
-  looked up by its `daily_dhw` id rather than typed out.
-- `summarise_zonal_statistics("max")` reduces the 30-day series to the peak DHW each
-  survey was exposed to.
-- Outputs: a hard coral cover histogram, a DHW histogram restricted to surveys exceeding
-  4 DHW, a coral-cover-vs-DHW scatter with the 4 and 8 DHW bleaching thresholds shaded,
-  the same relationship faceted by year for years that saw heat stress, and an interactive
-  map of the survey sites with a dropdown to isolate a single survey year.
+- **Raster covariate:** `daily_dhw`, with `n_days = 30`, `radius = 1000` m and
+  `spatial_stats = "mean"`, reduced with `summarise_zonal_statistics("max")` to the peak
+  DHW each survey was exposed to.
 - Thresholds and colours are defined once in the setup chunk (`alert_1`, `alert_2`,
-  `col_red`, `col_amber`, `col_green`), so every figure uses the same values.
+  `col_red`, `col_amber`, `col_green`), so every figure uses the same values. 4 and 8 DHW
+  are NOAA Coral Reef Watch Bleaching Alert Levels 1 and 2.
+- **Outputs:** a hard coral cover histogram; a DHW histogram restricted to surveys
+  exceeding 4 DHW; a coral-cover-vs-DHW scatter with the 4 and 8 DHW thresholds shaded;
+  the same faceted by year for years that saw heat stress; and an interactive map of the
+  survey sites with a dropdown to isolate a single survey year.
 
 ### 3. Mapping the same data two ways
 
@@ -77,15 +82,24 @@ Because it reads the cache rather than the API, it renders in seconds.
 
 ## Covariate access pattern
 
-The two analysis documents follow the same three steps from `mermaidrcovariates`:
+The two analysis documents use three functions from `mermaidrcovariates`:
 
 1. [`list_covariates()`](https://data-mermaid.github.io/mermaidr-covariates/reference/list_covariates.html)
-   to see what is available and to look up a covariate's full title from its id.
+   to see what is available. Covariates are referred to by **id** (`daily_sst`,
+   `daily_dhw`, `meow_boundaries`) rather than by title, since titles have changed
+   upstream before.
 2. [`get_zonal_statistics()`](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html)
-   to extract raster values around each survey location, for a chosen number of days
-   before the survey date.
-3. `summarise_zonal_statistics()` to reduce the daily series to a single value per survey
-   (for example the maximum).
+   for raster covariates. It returns one row per day per survey for the chosen window, so
+   the result is a short time series per sample event rather than a single number.
+3. [`summarise_zonal_statistics()`](https://data-mermaid.github.io/mermaidr-covariates/reference/summarise_zonal_statistics.html)
+   to collapse each series to one value per survey - here the maximum.
+
+Vector covariates take a different route:
+[`attach_covariate_data()`](https://data-mermaid.github.io/mermaidr-covariates/reference/attach_covariate_data.html)
+joins by location in a single call, with
+[`list_datasets_for_covariate()`](https://data-mermaid.github.io/mermaidr-covariates/reference/list_datasets_for_covariate.html)
+to see which columns are available. Note that its `columns` argument currently accepts
+only **one** column at a time; passing a vector fails with "the condition has length > 1".
 
 ## Repository structure
 
@@ -104,58 +118,80 @@ docs/                                          Rendered HTML, published via GitH
 ```
 
 `data/TestPtsCovariates.csv` and `data/realms.RData` are earlier working files and are not
-read by either of the current documents.
+read by any of the current documents.
 
 ## Data and caching
 
-Neither document ships the data it analyses. Both wrap their API calls in a
+None of the documents ship the data they analyse. Each wraps its API calls in a
 cache-or-download pattern: if the expected `.rds` file exists in `data/` it is read from
-disk, otherwise the data is pulled and then saved there for next time.
+disk, otherwise the data is pulled and then saved there for next time. Set
+`force_download <- TRUE` in a setup chunk to bypass the cache.
 
-Cache paths are built with `here::here("data", ...)`, so they resolve to this project's
-`data/` folder whether you run chunks interactively, render the document, or work from the
-R console.
+Three cache files are used:
+
+| File | Written by | Notes |
+| --- | --- | --- |
+| `mermaid_summ_ses.rds` | either analysis document | The global, unfiltered MERMAID export; shared between them |
+| `coralMeowSst_365days_1000m.rds` | example 1 | Named after the request parameters, not the row count |
+| `coral_data_dhw_30days.rds` | example 2 | Also read by example 3 |
+
+Cache paths are built with `here::here("data", ...)`. Each document calls `here::i_am()`
+in its setup chunk first, and that call is **load-bearing**: `_quarto.yml` lives in
+`analysis/`, which makes that folder look like a project root, so during a render
+`here::here()` would otherwise resolve to `analysis/` instead of the repository root and
+the caches would not be found.
 
 The cache files are listed in `.gitignore` (`data/*.rds`) and are **not** committed, so a
-fresh clone has to download them on its first render. Expect that to take a while - the
-30-day DHW extraction for the East Africa example takes roughly 15 minutes; the global SST
-example is larger still. Subsequent renders read from the cache and are near-instant.
+fresh clone downloads them on its first render. Budget for that: the 30-day DHW extraction
+takes roughly 15 minutes, and the global 365-day SST extraction took about 15 hours.
+Subsequent renders read from the cache and are near-instant. On a fresh clone, render
+example 2 before example 3, since example 3 reads the cache example 2 creates.
 
 ## Prerequisites
 
-R, [Quarto](https://quarto.org/), and:
+R 4.5 or newer, [Quarto](https://quarto.org/), and:
 
 ```r
-install.packages(c("here", "tidyverse", "mermaidr", "plotly", "DT", "janitor",
-                   "rstac", "geoarrow", "arrow", "sf", "leaflet"))
+install.packages(c("here", "tidyverse", "plotly", "DT", "janitor", "leaflet",
+                   "duckdb", "duckspatial"))
 
-# mermaidrcovariates is not on CRAN
+# not on CRAN
+remotes::install_github("data-mermaid/mermaidr")
 remotes::install_github("data-mermaid/mermaidr-covariates")
 ```
 
-Not every document needs everything. Only the SST example needs the spatial stack
-(`rstac`, `geoarrow`, `arrow`, `sf`) - note that `sf` requires GDAL, GEOS and PROJ on your
-system - and only the mapping comparison needs `leaflet`. The DHW example runs without
-either.
+The R version matters. `attach_covariate_data()` reads the covariate parquet through
+DuckDB, and the file uses native spatial geometry with CRS type modifiers, which needs
+**duckdb 1.5 or later**. CRAN only builds Windows binaries for the current and previous R
+releases, so on older R you are capped at duckdb 1.2.1 and the vector covariate example
+will fail with `Type 'GEOMETRY' does not take any type modifiers`.
 
-All documents use only publicly available MERMAID data, so no API token is needed.
+Not every document needs everything: `leaflet` is only used by example 3, and `janitor`
+only by example 2. All documents use publicly available MERMAID data, so no API token is
+needed.
 
 ## Reproducing
 
 Open the `.Rproj` file, then either render a single document from RStudio, or from a
-terminal in the `analysis/` folder:
+terminal at the repository root:
 
 ```
-quarto render coral-cover-covariates-DHW-East-Africa.qmd
+quarto render analysis/coral-cover-covariates-DHW-East-Africa.qmd
 ```
 
 Output is written to `docs/`, as configured in `analysis/_quarto.yml`.
 
-To force a fresh download instead of using the cache, delete the relevant file from
-`data/`.
+Two tips for the long first run. Chunk output is captured by knitr during a render, so
+progress messages only appear in the finished HTML - to watch a long download live, run
+the chunks interactively instead and render afterwards, when it becomes a cache hit. And
+before any long render, this catches syntax errors in seconds:
 
-Note that `map-comparison-DHW-East-Africa.qmd` reads the cache created by
-`coral-cover-covariates-DHW-East-Africa.qmd`, so render that one first on a fresh clone.
+```r
+tmp <- tempfile(fileext = ".R")
+knitr::purl("analysis/coral-cover-covariates-analysis.qmd", output = tmp, quiet = TRUE)
+invisible(parse(tmp))
+unlink(tmp)
+```
 
 ## License
 

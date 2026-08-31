@@ -44,7 +44,7 @@ library(plotly)
 library(DT)
 
 # Install mermaidr.covariates (if needed)
-# remotes::install_github("data-mermaid/mermaidr-covariates")
+remotes::install_github("data-mermaid/mermaidr-covariates")
 
 library(mermaidrcovariates)
 
@@ -210,21 +210,11 @@ Note that this reads the covariate through DuckDB and needs the `duckdb` package
 
 ```{r extract-join-vector}
 #| results: asis
-# Look the covariate up by its id so that a change to its title upstream
-# cannot silently break this document.
-meow_covariate <- covariates_df %>%
-  filter(id == "meow_boundaries") %>%
-  pull(title)
-
-# `columns` currently accepts only ONE column - the package validates it with
-# `col %in% ...` inside an `if()`, so passing a vector errors with "the
-# condition has length > 1". Realm is the only MEOW field used here.
 # MEOW column names are upper case; rename to match the rest of this document.
 coral_meow <- coral_data %>%
   attach_covariate_data(
-    covariate = meow_covariate,
-    columns = "REALM"
-  ) %>%
+    covariate = "meow_boundaries",
+    columns = "REALM") %>%
   rename(realm = REALM)
 
 # Determine if any of the sample events do not have a realm assigned and, if so, remove.
@@ -232,12 +222,14 @@ cat('<span style="color: #006400;">Removing', sum(is.na(coral_meow$realm)),
     'of', nrow(coral_meow), 'sample events due to missing realms</span>\n\n')
 
 coral_meow <- coral_meow %>%
-  filter(!is.na(realm))
+  filter(!is.na(realm)) #1191 sample events could not be connected to REALM
 ```
 
 #### Get zonal statistics for SST (raster)
 
-The next function of interest is [get_summary_zonal_statistics](https://data-mermaid.github.io/mermaidr-covariates/reference/get_summary_zonal_statistics.html), which extracts raster data like SST and reduces it to one value per survey in a single step. Here we take the **maximum** daily SST across the 365 days prior to each sample date (`temporal_stats = "max"`), spatially averaged within a 1 km radius (`spatial_stats = "mean"`). Any window can be used via the `n_days` argument. The chunk below runs it on the first 10 sample events to show what comes back; the full global extraction follows in the next chunk.
+Raster covariates are extracted in two steps. [`get_zonal_statistics()`](https://data-mermaid.github.io/mermaidr-covariates/reference/get_zonal_statistics.html) returns one row per day per survey - here the 365 days before each sample date, spatially averaged within a 1 km radius (`spatial_stats = "mean"`) - and [`summarise_zonal_statistics()`](https://data-mermaid.github.io/mermaidr-covariates/reference/summarise_zonal_statistics.html) then collapses each survey's series to a single value. We take the **maximum**, so the variable is the hottest day of the year preceding each survey. Any window can be used via the `n_days` argument.
+
+The chunk below runs the first step on 10 sample events so the daily structure is visible before it is collapsed; the full global extraction follows in the next chunk.
 
 ```{r get-zonal-stats-standard}
 # Demonstrate the call on the first 10 sample events so the shape of the result
@@ -245,26 +237,23 @@ The next function of interest is [get_summary_zonal_statistics](https://data-mer
 # cached - so this example deliberately does not repeat that work.
 # Look the covariate up by id rather than typing its title, which has changed
 # upstream before.
-sst_covariate <- covariates_df %>%
-  filter(id == "daily_sst") %>%
-  pull(title)
-
 sst_example <- coral_meow %>%
   slice(1:10) %>%
-  mermaidrcovariates::get_summary_zonal_statistics(
-    covariate = sst_covariate,
+  mermaidrcovariates::get_zonal_statistics(
+    covariate = "daily_sst",
     n_days = 365,
     radius = 1000,
-    spatial_stats = "mean",
-    temporal_stats = "max")
+    spatial_stats = "mean")
 
-sst_example
+head(sst_example)
 ```
 
 ```{r get-zonal-stats-batches-checks-save}
 #| results: asis
 NumSe <- nrow(coral_meow)
 NumDays <- 365
+Radius <- 1000
+batch_size <- 50  # Adjust based on what works for your data
 
 # Define the file path for saved data. here::here() anchors this to the
 # project's own data/ folder whether the code is run from a chunk, from the
@@ -290,7 +279,6 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
   start_time <- Sys.time()
 
   # Process in batches to handle potential errors
-  batch_size <- 10  # Adjust based on what works for your data
   total_rows <- NumSe
   all_results <- list()
   failed_rows <- c()
@@ -302,15 +290,20 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
         'of', total_rows, '...</span>\n\n')
 
     tryCatch({
+      # Summarise inside the batch. get_zonal_statistics() returns one row per
+      # day per survey, so at 365 days across ~5,000 surveys the raw series is
+      # ~1.8 million rows. Collapsing each batch first means all_results holds
+      # one row per survey instead. The reduction is per survey, so this gives
+      # exactly the same answer as summarising after binding.
       batch_result <- coral_meow %>%
         slice(start:end) %>%
-        mermaidrcovariates::get_summary_zonal_statistics(
-          covariate = sst_covariate,
+        mermaidrcovariates::get_zonal_statistics(
+          covariate = "daily_sst",
           n_days = NumDays,
-          radius = 1000,
-          spatial_stats = "mean",
-          temporal_stats = "max"
-        )
+          radius = Radius,
+          spatial_stats = "mean"
+        ) %>%
+        summarise_zonal_statistics("max")
       all_results[[length(all_results) + 1]] <- batch_result
 
     }, error = function(e) {
@@ -321,13 +314,13 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
         tryCatch({
           row_result <- coral_meow %>%
             slice(i) %>%
-            mermaidrcovariates::get_summary_zonal_statistics(
-              covariate = sst_covariate,
+            mermaidrcovariates::get_zonal_statistics(
+              covariate = "daily_sst",
               n_days = NumDays,
-              radius = 1000,
-              spatial_stats = "mean",
-              temporal_stats = "max"
-            )
+              radius = Radius,
+              spatial_stats = "mean"
+            ) %>%
+            summarise_zonal_statistics("max")
           all_results[[length(all_results) + 1]] <- row_result
         }, error = function(e2) {
           failed_rows <<- c(failed_rows, i)
@@ -353,9 +346,10 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
         paste(failed_rows, collapse = ", "), '</span>\n\n')
   }
 
-  # Unnest data for easier use
+  # Unnest data for easier use. summarise_zonal_statistics() returns its
+  # result in a `summary_zonal_statistics` list-column, as in the DHW example.
   coral_meow_sst <- coral_meow_sst %>%
-    unnest(covariates)
+    unnest(summary_zonal_statistics)
 
   cat('<span style="color: #006400;">Total SST records retrieved:',
       nrow(coral_meow_sst), '</span>\n\n')

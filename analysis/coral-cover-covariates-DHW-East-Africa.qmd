@@ -568,6 +568,15 @@ coralDhwFacetGG <-
   )
 
 coralDhwFacetGG
+
+ggsave(
+  filename = here::here("plots", "coral_cover_heat_stress_by_year.png"),
+  plot     = coralDhwFacetGG,
+  width    = 9,
+  height   = 6,
+  dpi      = 300,
+  bg       = "white"
+)
 ```
 
 ## Survey sites and heat stress exposure

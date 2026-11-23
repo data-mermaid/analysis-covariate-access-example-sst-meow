@@ -196,6 +196,18 @@ covariates <- list_covariates()
 covariates_df <- covariates %>% 
   select(id, title, description)
 
+find_covariate_id <- function(name, ids = covariates_df$id) {
+  hit <- ids[ids == name | endsWith(ids, paste0("_", name))]
+  if (length(hit) != 1) {
+    stop("Expected one covariate id matching '", name, "', found ",
+         length(hit), ": ", paste(hit, collapse = ", "))
+  }
+  hit
+}
+
+meow_id <- find_covariate_id("meow_boundaries")
+sst_id  <- find_covariate_id("daily_sst")
+
 # Create interactive table
 datatable(
   covariates_df,
@@ -221,7 +233,7 @@ Note that this reads the covariate through DuckDB and needs the `duckdb` package
 # MEOW column names are upper case; rename to match the rest of this document.
 coral_meow <- coral_data %>%
   attach_covariate_data(
-    covariate = "meow_boundaries",
+    covariate = meow_id,
     columns = "REALM") %>%
   rename(realm = REALM)
 
@@ -248,7 +260,7 @@ The chunk below runs the first step on 10 sample events so the daily structure i
 sst_example <- coral_meow %>%
   slice(1:10) %>%
   mermaidrcovariates::get_zonal_statistics(
-    covariate = "daily_sst",
+    covariate = sst_id,
     n_days = 365,
     radius = 1000,
     spatial_stats = "mean")
@@ -336,7 +348,7 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
       batch_result <- coral_meow %>%
         slice(start:end) %>%
         mermaidrcovariates::get_zonal_statistics(
-          covariate = "daily_sst",
+          covariate = sst_id,
           n_days = NumDays,
           radius = Radius,
           spatial_stats = "mean"
@@ -353,7 +365,7 @@ if (file.exists(sst_data_file) & force_download == FALSE) {
           row_result <- coral_meow %>%
             slice(i) %>%
             mermaidrcovariates::get_zonal_statistics(
-              covariate = "daily_sst",
+              covariate = sst_id,
               n_days = NumDays,
               radius = Radius,
               spatial_stats = "mean"
